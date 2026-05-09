@@ -1,8 +1,10 @@
 import { getBoard } from "@/lib/board";
+import { getDbSnapshot } from "@/lib/db-snapshot";
 import { Board } from "./_components/Board";
+import { DbInspector } from "./_components/DbInspector";
 
 export default async function Home() {
-  const columns = await getBoard();
+  const [columns, snapshot] = await Promise.all([getBoard(), getDbSnapshot()]);
   const total = columns.reduce((sum, col) => sum + col.cards.length, 0);
 
   return (
@@ -14,6 +16,7 @@ export default async function Home() {
         </div>
       </header>
       <Board initial={columns} />
+      <DbInspector snapshot={snapshot} />
     </main>
   );
 }
