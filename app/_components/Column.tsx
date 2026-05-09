@@ -8,6 +8,7 @@ import type { BoardColumn } from "@/lib/board";
 
 type Props = {
   column: BoardColumn;
+  onOpenCard?: (cardId: string) => void;
 };
 
 const COLOR_DOT: Record<string, string> = {
@@ -16,7 +17,7 @@ const COLOR_DOT: Record<string, string> = {
   purple: "bg-purple-500",
 };
 
-export function Column({ column }: Props) {
+export function Column({ column, onOpenCard }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const cardIds = column.cards.map((c) => c.id);
   const dotClass = COLOR_DOT[column.color] ?? "bg-zinc-400";
@@ -46,7 +47,9 @@ export function Column({ column }: Props) {
           {column.cards.length === 0 ? (
             <p className="px-2 py-4 text-center text-xs text-zinc-400">項目がありません</p>
           ) : (
-            column.cards.map((card) => <Card key={card.id} card={card} />)
+            column.cards.map((card) => (
+              <Card key={card.id} card={card} onOpen={onOpenCard} />
+            ))
           )}
         </SortableContext>
       </div>

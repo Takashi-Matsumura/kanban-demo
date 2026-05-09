@@ -13,6 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Column } from "./Column";
 import { Card } from "./Card";
+import { CardDetail } from "./CardDetail";
 import type { BoardColumn } from "@/lib/board";
 import { moveCard } from "../actions";
 
@@ -25,6 +26,7 @@ const ORDER_STEP = 1024;
 export function Board({ initial }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   // initial が変わった（= Server Action 後に revalidate された）ら state を同期。
@@ -113,9 +115,11 @@ export function Board({ initial }: Props) {
     });
   }
 
-  const activeCard = activeCardId
-    ? columns.flatMap((c) => c.cards).find((c) => c.id === activeCardId)
-    : null;
+  const allCards = useMemo(() => columns.flatMap((c) => c.cards), [columns]);
+  const activeCard = activeCardId ? allCards.find((c) => c.id === activeCardId) : null;
+  // open 中のカードが削除された場合、find が undefined を返すのでパネルは描画されない。
+  // openCardId 自体は残るが副作用なし（cuid なので衝突しない）。
+  const openCard = openCardId ? allCards.find((c) => c.id === openCardId) : null;
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
@@ -127,11 +131,18 @@ export function Board({ initial }: Props) {
       >
         <div className="flex gap-4 overflow-x-auto pb-4">
           {columns.map((column) => (
-            <Column key={column.id} column={column} />
+            <Column key={column.id} column={column} onOpenCard={setOpenCardId} />
           ))}
         </div>
         <DragOverlay>{activeCard ? <Card card={activeCard} dragging /> : null}</DragOverlay>
       </DndContext>
+      {openCard ? (
+        <CardDetail
+          key={openCard.id}
+          card={openCard}
+          onClose={() => setOpenCardId(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -141,7 +152,9 @@ function signature(columns: BoardColumn[]) {
     .map((col) =>
       [
         col.id,
-        col.cards.map((c) => [c.id, c.order, c.columnId, c.title, c.description]).flat(),
+        col.cards
+          .map((c) => [c.id, c.order, c.columnId, c.title, c.description, c.updatedAt])
+          .flat(),
       ].join(":")
     )
     .join("|");

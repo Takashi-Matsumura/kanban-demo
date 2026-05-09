@@ -7,6 +7,8 @@ export type BoardCard = {
   description: string | null;
   order: number;
   columnId: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type BoardColumn = {
@@ -42,6 +44,8 @@ export async function getBoard(): Promise<BoardColumn[]> {
       description: card.description,
       order: card.order,
       columnId: card.columnId,
+      createdAt: card.createdAt.toISOString(),
+      updatedAt: card.updatedAt.toISOString(),
     })),
   }));
 }
