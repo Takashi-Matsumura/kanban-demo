@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# kanban-demo
 
-## Getting Started
+GitHub Projects 風のシンプルなカンバンアプリ。個人ローカル利用を想定したミニマル実装です。
 
-First, run the development server:
+- 3 列固定（Todo / In Progress / Done）
+- カードの追加・編集・削除
+- ドラッグ & ドロップで列内 / 列間の並び替え
+- データは SQLite ファイル (`prisma/dev.db`) に永続化
+- 日本語 UI
+
+## 技術スタック
+
+| 役割 | 採用 |
+| --- | --- |
+| フレームワーク | Next.js 16 (App Router, Cache Components) |
+| 言語 | TypeScript |
+| UI | React 19 / Tailwind CSS v4 |
+| データ層 | Prisma 7 + SQLite (`@prisma/adapter-better-sqlite3`) |
+| ミューテーション | Server Actions + `updateTag('board')` |
+| ドラッグ & ドロップ | `@dnd-kit/core` / `@dnd-kit/sortable` |
+
+## セットアップ
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install              # 依存をインストール（postinstall で prisma generate も実行）
+npm run db:push          # SQLite DB を作成・スキーマ反映
+npm run db:seed          # 3 列（Todo / In Progress / Done）をシード
+npm run dev              # 開発サーバを起動
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## スクリプト
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| script | 説明 |
+| --- | --- |
+| `npm run dev` | 開発サーバ起動（Turbopack） |
+| `npm run build` | プロダクションビルド |
+| `npm start` | プロダクション起動 |
+| `npm run lint` | ESLint |
+| `npm run db:push` | Prisma スキーマを SQLite に反映 |
+| `npm run db:seed` | 列をシード |
 
-## Learn More
+## ディレクトリ構成
 
-To learn more about Next.js, take a look at the following resources:
+```
+app/
+  page.tsx                  # Server Component。getBoard() で初期データ取得
+  actions.ts                # Server Actions (use server) + updateTag
+  layout.tsx
+  _components/
+    Board.tsx               # DndContext + 楽観的更新
+    Column.tsx              # SortableContext + Droppable
+    Card.tsx                # useSortable + インライン編集
+    AddCardForm.tsx         # form action でカード追加
+lib/
+  prisma.ts                 # PrismaClient シングルトン
+  board.ts                  # 'use cache' + cacheTag('board') の getBoard
+prisma/
+  schema.prisma             # Column / Card モデル
+  seed.ts                   # 3 列の初期投入
+prisma.config.ts            # Prisma 7 の datasource + adapter 設定
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 制限事項 / 今後の予定
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- 認証なし（ローカル単一ユーザー前提）
+- 列の追加・削除・並び替えは未対応（3 列固定）
+- ダークモード、ラベル、担当者、Due 日、検索/フィルタは未対応
+- Vercel など外部デプロイは未対応（SQLite 永続化のため）
 
-## Deploy on Vercel
+## ライセンス
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+[MIT License](./LICENSE)
