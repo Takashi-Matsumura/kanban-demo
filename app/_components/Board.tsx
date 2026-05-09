@@ -124,6 +124,7 @@ export function Board({ initial }: Props) {
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
       <DndContext
+        id="kanban-board"
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}
