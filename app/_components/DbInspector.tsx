@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import type { CardRow, ColumnRow, DbSnapshot } from "@/lib/db-snapshot";
 
 type Props = {
@@ -17,7 +20,47 @@ function formatDate(iso: string) {
   return dateFormatter.format(new Date(iso));
 }
 
+function cardSig(card: CardRow) {
+  return [card.title, card.description ?? "", card.order, card.columnId, card.updatedAt].join("|");
+}
+
+function columnSig(col: ColumnRow) {
+  return [col.name, col.description ?? "", col.color, col.order].join("|");
+}
+
+function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
+  const out = new Set<string>();
+  const prevCards = new Map(prev.cards.map((c) => [c.id, cardSig(c)]));
+  for (const c of next.cards) {
+    if (prevCards.get(c.id) !== cardSig(c)) out.add(`card:${c.id}`);
+  }
+  const prevCols = new Map(prev.columns.map((c) => [c.id, columnSig(c)]));
+  for (const c of next.columns) {
+    if (prevCols.get(c.id) !== columnSig(c)) out.add(`col:${c.id}`);
+  }
+  return out;
+}
+
 export function DbInspector({ snapshot }: Props) {
+  // 直近で変化した行 id 集合（"card:<id>" / "col:<id>"）
+  const [highlights, setHighlights] = useState<Set<string>>(new Set());
+  // 前回スナップショットを state として保持し、render-time で diff を取る
+  // （React 公式の "Storing information from previous renders" パターン。useEffect 内の setState を避ける）
+  const [prevSnapshot, setPrevSnapshot] = useState(snapshot);
+
+  if (prevSnapshot !== snapshot) {
+    const diff = diffHighlights(prevSnapshot, snapshot);
+    setPrevSnapshot(snapshot);
+    if (diff.size > 0) setHighlights(diff);
+  }
+
+  // ハイライトは 2 秒で自然に消す
+  useEffect(() => {
+    if (highlights.size === 0) return;
+    const t = setTimeout(() => setHighlights(new Set()), 2000);
+    return () => clearTimeout(t);
+  }, [highlights]);
+
   return (
     <section className="mt-8 border-t border-zinc-200 bg-white">
       <div className="mx-auto max-w-7xl px-6 py-6">
@@ -25,22 +68,27 @@ export function DbInspector({ snapshot }: Props) {
           <h2 className="text-base font-semibold text-zinc-900">データベース (SQLite)</h2>
           <p className="mt-1 text-xs text-zinc-500">
             画面上のカンバンが、実際にどのようなテーブル・行として SQLite に保存されているかをリアルタイムで表示します。
-            上部でカードの追加・編集・移動を行うと、下のテーブルも更新されます。
+            上部でカードの追加・編集・移動を行うと、下のテーブルも更新され、変更行が一瞬黄色く光ります。
           </p>
         </header>
 
-        <div className="space-y-6">
-          <ColumnTable rows={snapshot.columns} />
-          <CardTable rows={snapshot.cards} />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <ColumnTable rows={snapshot.columns} highlights={highlights} />
+          <CardTable rows={snapshot.cards} highlights={highlights} />
         </div>
       </div>
     </section>
   );
 }
 
-function ColumnTable({ rows }: { rows: ColumnRow[] }) {
+type TableProps<T> = {
+  rows: T[];
+  highlights: Set<string>;
+};
+
+function ColumnTable({ rows, highlights }: TableProps<ColumnRow>) {
   return (
-    <div>
+    <div className="min-w-0">
       <h3 className="mb-2 text-sm font-semibold text-zinc-800">
         Column テーブル <span className="text-zinc-500">({rows.length} 行)</span>
       </h3>
@@ -58,7 +106,12 @@ function ColumnTable({ rows }: { rows: ColumnRow[] }) {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id} className="border-t border-zinc-200">
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`col:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
                 <Td mono>{row.id}</Td>
                 <Td>{row.name}</Td>
                 <Td>{nullable(row.description)}</Td>
@@ -74,9 +127,9 @@ function ColumnTable({ rows }: { rows: ColumnRow[] }) {
   );
 }
 
-function CardTable({ rows }: { rows: CardRow[] }) {
+function CardTable({ rows, highlights }: TableProps<CardRow>) {
   return (
-    <div>
+    <div className="min-w-0">
       <h3 className="mb-2 text-sm font-semibold text-zinc-800">
         Card テーブル <span className="text-zinc-500">({rows.length} 行)</span>
       </h3>
@@ -100,7 +153,12 @@ function CardTable({ rows }: { rows: CardRow[] }) {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id} className="border-t border-zinc-200">
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`card:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
                 <Td mono>{row.id}</Td>
                 <Td>{row.title}</Td>
                 <Td>{nullable(row.description)}</Td>
