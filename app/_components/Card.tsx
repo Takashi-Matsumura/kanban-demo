@@ -2,9 +2,9 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import type { BoardCard } from "@/lib/board";
-import { deleteCard, renameCard } from "../actions";
+import { deleteCard } from "../actions";
 
 type Props = {
   card: BoardCard;
@@ -16,8 +16,6 @@ export function Card({ card, dragging, onOpen }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
   });
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(card.title);
   const [, startTransition] = useTransition();
 
   const style: React.CSSProperties = {
@@ -25,17 +23,6 @@ export function Card({ card, dragging, onOpen }: Props) {
     transition,
     opacity: isDragging ? 0.4 : 1,
   };
-
-  function commit() {
-    setEditing(false);
-    if (draft.trim() === "" || draft === card.title) {
-      setDraft(card.title);
-      return;
-    }
-    startTransition(async () => {
-      await renameCard(card.id, draft);
-    });
-  }
 
   function onDelete() {
     if (!confirm("このカードを削除しますか？")) return;
@@ -68,37 +55,7 @@ export function Card({ card, dragging, onOpen }: Props) {
         </button>
 
         <div className="flex-1 min-w-0">
-          {editing ? (
-            <input
-              autoFocus
-              value={draft}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  (e.target as HTMLInputElement).blur();
-                }
-                if (e.key === "Escape") {
-                  setDraft(card.title);
-                  setEditing(false);
-                }
-              }}
-              className="w-full rounded border border-zinc-300 px-1 py-0.5 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditing(true);
-              }}
-              className="block w-full text-left text-sm text-zinc-900 hover:text-blue-700"
-            >
-              {card.title}
-            </button>
-          )}
+          <p className="text-sm text-zinc-900">{card.title}</p>
           {card.description ? (
             <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{card.description}</p>
           ) : null}
