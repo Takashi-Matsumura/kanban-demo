@@ -1,11 +1,21 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { prisma } from "./prisma";
+import { equipmentTypeForStage } from "./stage-equipment";
+
+export { equipmentTypeForStage };
 
 export type BoardProduct = {
   id: string;
   name: string;
   sku: string;
   category: string;
+};
+
+export type BoardEquipment = {
+  id: string;
+  name: string;
+  type: string;
+  capacity: number | null;
 };
 
 export type BoardCard = {
@@ -16,6 +26,7 @@ export type BoardCard = {
   columnId: string;
   lotCode: string | null;
   product: BoardProduct | null;
+  equipment: BoardEquipment | null;
   plannedQty: number | null;
   actualQty: number | null;
   batchDate: string | null;
@@ -24,6 +35,7 @@ export type BoardCard = {
   priority: string;
   note: string | null;
   currentStageEnteredAt: string;
+  targetReadyAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -36,8 +48,9 @@ export type BoardColumn = {
   order: number;
   stageType: string | null;
   expectedMinutes: number | null;
+  /** この工程で使う設備種別（"proofer" | "oven" | null）。stageType から導出 */
+  equipmentType: string | null;
   wipCount: number;
-  /** 過去 7 日間の平均滞留時間（分）。データがなければ null */
   avgDwellMinutes: number | null;
   cards: BoardCard[];
 };
@@ -57,7 +70,7 @@ export async function getBoard(): Promise<BoardColumn[]> {
       include: {
         cards: {
           orderBy: { order: "asc" },
-          include: { product: true },
+          include: { product: true, equipment: true },
         },
       },
     }),
@@ -92,6 +105,7 @@ export async function getBoard(): Promise<BoardColumn[]> {
       order: column.order,
       stageType: column.stageType,
       expectedMinutes: column.expectedMinutes,
+      equipmentType: equipmentTypeForStage(column.stageType),
       wipCount: column.cards.length,
       avgDwellMinutes,
       cards: column.cards.map((card) => ({
@@ -109,6 +123,14 @@ export async function getBoard(): Promise<BoardColumn[]> {
               category: card.product.category,
             }
           : null,
+        equipment: card.equipment
+          ? {
+              id: card.equipment.id,
+              name: card.equipment.name,
+              type: card.equipment.type,
+              capacity: card.equipment.capacity,
+            }
+          : null,
         plannedQty: card.plannedQty,
         actualQty: card.actualQty,
         batchDate: card.batchDate ? card.batchDate.toISOString() : null,
@@ -117,6 +139,7 @@ export async function getBoard(): Promise<BoardColumn[]> {
         priority: card.priority,
         note: card.note,
         currentStageEnteredAt: card.currentStageEnteredAt.toISOString(),
+        targetReadyAt: card.targetReadyAt ? card.targetReadyAt.toISOString() : null,
         createdAt: card.createdAt.toISOString(),
         updatedAt: card.updatedAt.toISOString(),
       })),
@@ -135,5 +158,22 @@ export async function getProducts(): Promise<BoardProduct[]> {
     name: p.name,
     sku: p.sku,
     category: p.category,
+  }));
+}
+
+export async function getEquipments(): Promise<BoardEquipment[]> {
+  "use cache";
+  cacheLife("max");
+  cacheTag("board");
+
+  const equipments = await prisma.equipment.findMany({
+    where: { isActive: true },
+    orderBy: [{ type: "asc" }, { name: "asc" }],
+  });
+  return equipments.map((e) => ({
+    id: e.id,
+    name: e.name,
+    type: e.type,
+    capacity: e.capacity,
   }));
 }

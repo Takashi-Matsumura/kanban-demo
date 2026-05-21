@@ -19,6 +19,14 @@ export type ProductRow = {
   defaultPlannedQty: number | null;
 };
 
+export type EquipmentRow = {
+  id: string;
+  name: string;
+  type: string;
+  capacity: number | null;
+  isActive: boolean;
+};
+
 export type CardRow = {
   id: string;
   title: string;
@@ -27,6 +35,7 @@ export type CardRow = {
   columnId: string;
   lotCode: string | null;
   productId: string | null;
+  equipmentId: string | null;
   plannedQty: number | null;
   actualQty: number | null;
   batchDate: string | null;
@@ -35,6 +44,7 @@ export type CardRow = {
   priority: string;
   note: string | null;
   currentStageEnteredAt: string;
+  targetReadyAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,6 +62,7 @@ export type StageHistoryRow = {
 export type DbSnapshot = {
   columns: ColumnRow[];
   products: ProductRow[];
+  equipments: EquipmentRow[];
   cards: CardRow[];
   histories: StageHistoryRow[];
 };
@@ -61,9 +72,10 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
   cacheLife("max");
   cacheTag("board");
 
-  const [columns, products, cards, histories] = await Promise.all([
+  const [columns, products, equipments, cards, histories] = await Promise.all([
     prisma.column.findMany({ orderBy: { order: "asc" } }),
     prisma.product.findMany({ orderBy: { name: "asc" } }),
+    prisma.equipment.findMany({ orderBy: [{ type: "asc" }, { name: "asc" }] }),
     prisma.card.findMany({ orderBy: [{ columnId: "asc" }, { order: "asc" }] }),
     prisma.stageHistory.findMany({ orderBy: { enteredAt: "desc" }, take: 50 }),
   ]);
@@ -85,6 +97,13 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       category: p.category,
       defaultPlannedQty: p.defaultPlannedQty,
     })),
+    equipments: equipments.map((e) => ({
+      id: e.id,
+      name: e.name,
+      type: e.type,
+      capacity: e.capacity,
+      isActive: e.isActive,
+    })),
     cards: cards.map((c) => ({
       id: c.id,
       title: c.title,
@@ -93,6 +112,7 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       columnId: c.columnId,
       lotCode: c.lotCode,
       productId: c.productId,
+      equipmentId: c.equipmentId,
       plannedQty: c.plannedQty,
       actualQty: c.actualQty,
       batchDate: c.batchDate ? c.batchDate.toISOString() : null,
@@ -101,6 +121,7 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       priority: c.priority,
       note: c.note,
       currentStageEnteredAt: c.currentStageEnteredAt.toISOString(),
+      targetReadyAt: c.targetReadyAt ? c.targetReadyAt.toISOString() : null,
       createdAt: c.createdAt.toISOString(),
       updatedAt: c.updatedAt.toISOString(),
     })),

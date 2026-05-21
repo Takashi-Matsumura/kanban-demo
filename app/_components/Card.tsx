@@ -5,13 +5,17 @@ import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useState, useTransition } from "react";
 import type { BoardCard } from "@/lib/board";
 import { deleteCard } from "../actions";
+import { StageTimer } from "./StageTimer";
 
 type Props = {
   card: BoardCard;
   dragging?: boolean;
   expectedMinutes?: number | null;
+  stageType?: string | null;
   onOpen?: (cardId: string) => void;
 };
+
+const TIMER_STAGE_TYPES = new Set(["firstProof", "finalProof", "bake", "cool"]);
 
 const SHIFT_LABEL: Record<string, string> = {
   morning: "朝",
@@ -31,7 +35,8 @@ const PRIORITY_LABEL: Record<string, string> = {
   low: "低",
 };
 
-export function Card({ card, dragging, expectedMinutes, onOpen }: Props) {
+export function Card({ card, dragging, expectedMinutes, stageType, onOpen }: Props) {
+  const showTimer = stageType != null && TIMER_STAGE_TYPES.has(stageType);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
   });
@@ -101,12 +106,24 @@ export function Card({ card, dragging, expectedMinutes, onOpen }: Props) {
             <span className={`rounded border px-1.5 py-0.5 ${priorityStyle}`}>
               {priorityLabel}
             </span>
-            <DwellChip
+            {!showTimer ? (
+              <DwellChip
+                enteredAt={card.currentStageEnteredAt}
+                expectedMinutes={expectedMinutes ?? null}
+                dragging={dragging}
+              />
+            ) : null}
+          </div>
+
+          {showTimer ? (
+            <StageTimer
               enteredAt={card.currentStageEnteredAt}
               expectedMinutes={expectedMinutes ?? null}
+              targetReadyAt={card.targetReadyAt}
+              equipmentName={card.equipment?.name ?? null}
               dragging={dragging}
             />
-          </div>
+          ) : null}
 
           {card.note ? (
             <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{card.note}</p>

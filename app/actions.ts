@@ -123,6 +123,23 @@ export async function updateBatchMeta(
   updateTag("board");
 }
 
+export async function setEquipmentForCard(cardId: string, equipmentId: string | null) {
+  await prisma.card.update({
+    where: { id: cardId },
+    data: { equipmentId: equipmentId ?? null },
+  });
+  updateTag("board");
+}
+
+export async function overrideTargetReadyAt(cardId: string, isoOrNull: string | null) {
+  const value = isoOrNull && isoOrNull.trim() !== "" ? new Date(isoOrNull) : null;
+  await prisma.card.update({
+    where: { id: cardId },
+    data: { targetReadyAt: value },
+  });
+  updateTag("board");
+}
+
 export async function deleteCard(cardId: string) {
   await prisma.card.delete({ where: { id: cardId } });
   updateTag("board");
