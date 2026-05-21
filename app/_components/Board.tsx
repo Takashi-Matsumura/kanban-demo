@@ -10,7 +10,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
@@ -131,9 +131,18 @@ export function Board({ initial, products }: Props) {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {columns.map((column) => (
-            <Column key={column.id} column={column} products={products} onOpenCard={setOpenCardId} />
+        <div className="flex items-stretch gap-2 overflow-x-auto pb-4">
+          {columns.map((column, i) => (
+            <Fragment key={column.id}>
+              <Column
+                column={column}
+                products={products}
+                onOpenCard={setOpenCardId}
+                index={i}
+                total={columns.length}
+              />
+              {i < columns.length - 1 ? <FlowArrow /> : null}
+            </Fragment>
           ))}
         </div>
         <DragOverlay>{activeCard ? <Card card={activeCard} dragging /> : null}</DragOverlay>
@@ -145,6 +154,17 @@ export function Board({ initial, products }: Props) {
           onClose={() => setOpenCardId(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function FlowArrow() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none flex shrink-0 items-center pt-10 text-zinc-300"
+    >
+      ▶
     </div>
   );
 }

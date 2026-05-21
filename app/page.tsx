@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { getDashboardSummary } from "@/lib/dashboard";
 import { TodayLabel } from "./_components/TodayLabel";
+import { StageFlow } from "./_components/StageFlow";
 
 const SHIFT_LABEL: Record<string, string> = {
   morning: "朝便",
@@ -62,31 +63,7 @@ export default async function DashboardPage() {
           <KpiCard label="出荷済" value={summary.totals.shipped} accent="green" />
         </div>
 
-        <section className="rounded-lg border border-zinc-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-zinc-800">工程別バッチ数</h3>
-          <div className="mt-3 grid grid-cols-[8rem_1fr_2.5rem] items-center gap-x-3 gap-y-1.5 text-sm">
-            {summary.stages.map((stage) => {
-              const dotClass = COLOR_DOT[stage.color] ?? "bg-zinc-400";
-              const barClass = COLOR_BAR[stage.color] ?? "bg-zinc-400";
-              const pct = (stage.cardCount / maxStageCount) * 100;
-              return (
-                <Fragment key={stage.id}>
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
-                    <span className="truncate text-zinc-700">{stage.name}</span>
-                  </div>
-                  <div className="h-3 overflow-hidden rounded bg-zinc-100">
-                    <div
-                      className={`h-full ${barClass}`}
-                      style={{ width: stage.cardCount === 0 ? 0 : `${Math.max(4, pct)}%` }}
-                    />
-                  </div>
-                  <span className="text-right font-mono text-zinc-600">{stage.cardCount}</span>
-                </Fragment>
-              );
-            })}
-          </div>
-        </section>
+        <StageFlow stages={summary.stages} />
 
         <div className="grid flex-1 grid-cols-2 gap-3 min-h-0">
           <section className="flex flex-col rounded-lg border border-zinc-200 bg-white p-4">
