@@ -23,6 +23,7 @@ export type BoardCard = {
   assignee: string | null;
   priority: string;
   note: string | null;
+  currentStageEnteredAt: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,58 +36,92 @@ export type BoardColumn = {
   order: number;
   stageType: string | null;
   expectedMinutes: number | null;
+  wipCount: number;
+  /** 過去 7 日間の平均滞留時間（分）。データがなければ null */
+  avgDwellMinutes: number | null;
   cards: BoardCard[];
 };
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function getBoard(): Promise<BoardColumn[]> {
   "use cache";
   cacheLife("max");
   cacheTag("board");
 
-  const columns = await prisma.column.findMany({
-    orderBy: { order: "asc" },
-    include: {
-      cards: {
-        orderBy: { order: "asc" },
-        include: { product: true },
-      },
-    },
-  });
+  const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS);
 
-  return columns.map((column) => ({
-    id: column.id,
-    name: column.name,
-    description: column.description,
-    color: column.color,
-    order: column.order,
-    stageType: column.stageType,
-    expectedMinutes: column.expectedMinutes,
-    cards: column.cards.map((card) => ({
-      id: card.id,
-      title: card.title,
-      description: card.description,
-      order: card.order,
-      columnId: card.columnId,
-      lotCode: card.lotCode,
-      product: card.product
-        ? {
-            id: card.product.id,
-            name: card.product.name,
-            sku: card.product.sku,
-            category: card.product.category,
-          }
-        : null,
-      plannedQty: card.plannedQty,
-      actualQty: card.actualQty,
-      batchDate: card.batchDate ? card.batchDate.toISOString() : null,
-      shift: card.shift,
-      assignee: card.assignee,
-      priority: card.priority,
-      note: card.note,
-      createdAt: card.createdAt.toISOString(),
-      updatedAt: card.updatedAt.toISOString(),
-    })),
-  }));
+  const [columns, histories] = await Promise.all([
+    prisma.column.findMany({
+      orderBy: { order: "asc" },
+      include: {
+        cards: {
+          orderBy: { order: "asc" },
+          include: { product: true },
+        },
+      },
+    }),
+    prisma.stageHistory.findMany({
+      where: {
+        enteredAt: { gte: sevenDaysAgo },
+        durationSec: { not: null },
+      },
+      select: { columnId: true, durationSec: true },
+    }),
+  ]);
+
+  const sumByCol = new Map<string, { sum: number; count: number }>();
+  for (const h of histories) {
+    if (h.durationSec == null) continue;
+    const e = sumByCol.get(h.columnId) ?? { sum: 0, count: 0 };
+    e.sum += h.durationSec;
+    e.count += 1;
+    sumByCol.set(h.columnId, e);
+  }
+
+  return columns.map((column) => {
+    const agg = sumByCol.get(column.id);
+    const avgDwellMinutes =
+      agg && agg.count > 0 ? Math.round(agg.sum / agg.count / 60) : null;
+
+    return {
+      id: column.id,
+      name: column.name,
+      description: column.description,
+      color: column.color,
+      order: column.order,
+      stageType: column.stageType,
+      expectedMinutes: column.expectedMinutes,
+      wipCount: column.cards.length,
+      avgDwellMinutes,
+      cards: column.cards.map((card) => ({
+        id: card.id,
+        title: card.title,
+        description: card.description,
+        order: card.order,
+        columnId: card.columnId,
+        lotCode: card.lotCode,
+        product: card.product
+          ? {
+              id: card.product.id,
+              name: card.product.name,
+              sku: card.product.sku,
+              category: card.product.category,
+            }
+          : null,
+        plannedQty: card.plannedQty,
+        actualQty: card.actualQty,
+        batchDate: card.batchDate ? card.batchDate.toISOString() : null,
+        shift: card.shift,
+        assignee: card.assignee,
+        priority: card.priority,
+        note: card.note,
+        currentStageEnteredAt: card.currentStageEnteredAt.toISOString(),
+        createdAt: card.createdAt.toISOString(),
+        updatedAt: card.updatedAt.toISOString(),
+      })),
+    };
+  });
 }
 
 export async function getProducts(): Promise<BoardProduct[]> {

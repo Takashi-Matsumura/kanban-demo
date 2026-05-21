@@ -53,19 +53,28 @@ export async function createBatch(args: {
   });
   const nextOrder = (last?.order ?? 0) + ORDER_STEP;
 
-  await prisma.card.create({
-    data: {
-      columnId,
-      order: nextOrder,
-      title: `${product.name} ${SHIFT_LABEL[shift]}便`,
-      lotCode,
-      productId,
-      shift,
-      batchDate,
-      plannedQty,
-      priority: "normal",
-    },
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    const card = await tx.card.create({
+      data: {
+        columnId,
+        order: nextOrder,
+        title: `${product.name} ${SHIFT_LABEL[shift]}便`,
+        lotCode,
+        productId,
+        shift,
+        batchDate,
+        plannedQty,
+        priority: "normal",
+        currentStageEnteredAt: now,
+      },
+    });
+    await tx.stageHistory.create({
+      data: { cardId: card.id, columnId, enteredAt: now },
+    });
   });
+
   updateTag("board");
 }
 
@@ -121,10 +130,9 @@ export async function deleteCard(cardId: string) {
 
 /**
  * Move a card to a new column at a specific position.
- * The caller passes the orderBefore / orderAfter values of the neighbors in the target column.
- * If both are omitted -> append (last + STEP). Only orderAfter -> insert at top (first - STEP).
- * Only orderBefore -> after that card.
- * Both -> midpoint.
+ * Same-column reorder: only updates order, history unchanged.
+ * Cross-column move: closes previous history (leftAt + durationSec), opens new history, updates currentStageEnteredAt.
+ * Done atomically in a transaction.
  */
 export async function moveCard(args: {
   cardId: string;
@@ -145,9 +153,43 @@ export async function moveCard(args: {
     newOrder = ORDER_STEP;
   }
 
-  await prisma.card.update({
-    where: { id: cardId },
-    data: { columnId: toColumnId, order: newOrder },
+  await prisma.$transaction(async (tx) => {
+    const card = await tx.card.findUnique({ where: { id: cardId }, select: { columnId: true } });
+    if (!card) return;
+
+    const stageChanged = card.columnId !== toColumnId;
+
+    if (stageChanged) {
+      const now = new Date();
+      // 前工程の最新オープン履歴を閉じる
+      const open = await tx.stageHistory.findFirst({
+        where: { cardId, leftAt: null },
+        orderBy: { enteredAt: "desc" },
+      });
+      if (open) {
+        await tx.stageHistory.update({
+          where: { id: open.id },
+          data: {
+            leftAt: now,
+            durationSec: Math.max(0, Math.floor((now.getTime() - open.enteredAt.getTime()) / 1000)),
+          },
+        });
+      }
+      // 新工程の履歴を開く
+      await tx.stageHistory.create({
+        data: { cardId, columnId: toColumnId, enteredAt: now },
+      });
+      await tx.card.update({
+        where: { id: cardId },
+        data: { columnId: toColumnId, order: newOrder, currentStageEnteredAt: now },
+      });
+    } else {
+      await tx.card.update({
+        where: { id: cardId },
+        data: { order: newOrder },
+      });
+    }
   });
+
   updateTag("board");
 }

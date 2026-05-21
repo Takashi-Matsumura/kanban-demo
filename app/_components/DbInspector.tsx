@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { CardRow, ColumnRow, DbSnapshot, ProductRow } from "@/lib/db-snapshot";
+import type {
+  CardRow,
+  ColumnRow,
+  DbSnapshot,
+  ProductRow,
+  StageHistoryRow,
+} from "@/lib/db-snapshot";
 
 type Props = {
   snapshot: DbSnapshot;
@@ -45,8 +51,13 @@ function cardSig(card: CardRow) {
     card.assignee ?? "",
     card.priority,
     card.note ?? "",
+    card.currentStageEnteredAt,
     card.updatedAt,
   ].join("|");
+}
+
+function historySig(h: StageHistoryRow) {
+  return [h.cardId, h.columnId, h.enteredAt, h.leftAt ?? "", h.durationSec ?? ""].join("|");
 }
 
 function columnSig(col: ColumnRow) {
@@ -70,6 +81,10 @@ function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
   const prevProducts = new Map(prev.products.map((p) => [p.id, productSig(p)]));
   for (const p of next.products) {
     if (prevProducts.get(p.id) !== productSig(p)) out.add(`product:${p.id}`);
+  }
+  const prevHist = new Map(prev.histories.map((h) => [h.id, historySig(h)]));
+  for (const h of next.histories) {
+    if (prevHist.get(h.id) !== historySig(h)) out.add(`hist:${h.id}`);
   }
   return out;
 }
@@ -107,6 +122,9 @@ export function DbInspector({ snapshot }: Props) {
         </div>
         <div className="mt-6">
           <CardTable rows={snapshot.cards} highlights={highlights} />
+        </div>
+        <div className="mt-6">
+          <StageHistoryTable rows={snapshot.histories} highlights={highlights} />
         </div>
       </div>
     </section>
@@ -226,6 +244,7 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
               <Th>assignee</Th>
               <Th>priority</Th>
               <Th>order</Th>
+              <Th>enteredAt</Th>
               <Th>updatedAt</Th>
             </tr>
           </thead>
@@ -247,10 +266,70 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
                 <Td>{nullable(row.assignee)}</Td>
                 <Td>{row.priority}</Td>
                 <Td mono>{row.order}</Td>
+                <Td mono>{formatDate(row.currentStageEnteredAt)}</Td>
                 <Td mono>{formatDate(row.updatedAt)}</Td>
               </tr>
             ))}
-            {rows.length === 0 ? <EmptyRow colSpan={11} /> : null}
+            {rows.length === 0 ? <EmptyRow colSpan={12} /> : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function StageHistoryTable({ rows, highlights }: TableProps<StageHistoryRow>) {
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold text-zinc-800">
+        StageHistory テーブル <span className="text-zinc-500">(直近 {rows.length} 行)</span>
+      </h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        バッチが各工程に滞在した記録。<code className="rounded bg-zinc-100 px-1 py-0.5">leftAt</code>
+        が NULL なら現在その工程に滞在中。<code className="ml-1 rounded bg-zinc-100 px-1 py-0.5">durationSec</code>
+        は工程を抜けた時に計算される。
+      </p>
+      <div className="overflow-x-auto rounded border border-zinc-200">
+        <table className="min-w-full text-xs">
+          <thead className="bg-zinc-50 text-left text-zinc-600">
+            <tr>
+              <Th>cardId</Th>
+              <Th>columnId</Th>
+              <Th>enteredAt</Th>
+              <Th>leftAt</Th>
+              <Th>durationSec</Th>
+              <Th>byUser</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`hist:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
+                <Td mono>{row.cardId}</Td>
+                <Td mono>{row.columnId}</Td>
+                <Td mono>{formatDate(row.enteredAt)}</Td>
+                <Td mono>
+                  {row.leftAt ? (
+                    formatDate(row.leftAt)
+                  ) : (
+                    <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">滞在中</span>
+                  )}
+                </Td>
+                <Td mono>
+                  {row.durationSec != null ? (
+                    `${Math.round(row.durationSec / 60)} 分`
+                  ) : (
+                    <span className="text-zinc-400">NULL</span>
+                  )}
+                </Td>
+                <Td>{nullable(row.byUser)}</Td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <EmptyRow colSpan={6} /> : null}
           </tbody>
         </table>
       </div>

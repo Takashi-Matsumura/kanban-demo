@@ -34,14 +34,26 @@ export type CardRow = {
   assignee: string | null;
   priority: string;
   note: string | null;
+  currentStageEnteredAt: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type StageHistoryRow = {
+  id: string;
+  cardId: string;
+  columnId: string;
+  enteredAt: string;
+  leftAt: string | null;
+  durationSec: number | null;
+  byUser: string | null;
 };
 
 export type DbSnapshot = {
   columns: ColumnRow[];
   products: ProductRow[];
   cards: CardRow[];
+  histories: StageHistoryRow[];
 };
 
 export async function getDbSnapshot(): Promise<DbSnapshot> {
@@ -49,10 +61,11 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
   cacheLife("max");
   cacheTag("board");
 
-  const [columns, products, cards] = await Promise.all([
+  const [columns, products, cards, histories] = await Promise.all([
     prisma.column.findMany({ orderBy: { order: "asc" } }),
     prisma.product.findMany({ orderBy: { name: "asc" } }),
     prisma.card.findMany({ orderBy: [{ columnId: "asc" }, { order: "asc" }] }),
+    prisma.stageHistory.findMany({ orderBy: { enteredAt: "desc" }, take: 50 }),
   ]);
 
   return {
@@ -87,8 +100,18 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       assignee: c.assignee,
       priority: c.priority,
       note: c.note,
+      currentStageEnteredAt: c.currentStageEnteredAt.toISOString(),
       createdAt: c.createdAt.toISOString(),
       updatedAt: c.updatedAt.toISOString(),
+    })),
+    histories: histories.map((h) => ({
+      id: h.id,
+      cardId: h.cardId,
+      columnId: h.columnId,
+      enteredAt: h.enteredAt.toISOString(),
+      leftAt: h.leftAt ? h.leftAt.toISOString() : null,
+      durationSec: h.durationSec,
+      byUser: h.byUser,
     })),
   };
 }

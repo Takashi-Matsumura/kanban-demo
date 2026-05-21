@@ -42,12 +42,21 @@ export function Column({ column, products, index, total, onOpenCard }: Props) {
             {String(index + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
           </span>
           <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-xs text-zinc-700">
-            {column.cards.length}
+            WIP {column.wipCount}
           </span>
         </div>
         <div className="mt-1 flex items-center gap-2">
           <span className={`inline-block h-2.5 w-2.5 rounded-full ${dotClass}`} />
           <h2 className="text-sm font-semibold text-zinc-800">{column.name}</h2>
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[10px] text-zinc-500">
+          <span>標準 {column.expectedMinutes ?? "—"} 分</span>
+          <span>
+            平均{" "}
+            <span className="font-mono text-zinc-700">
+              {column.avgDwellMinutes != null ? `${column.avgDwellMinutes} 分` : "—"}
+            </span>
+          </span>
         </div>
       </header>
       {column.description ? (
@@ -60,7 +69,12 @@ export function Column({ column, products, index, total, onOpenCard }: Props) {
             <p className="px-2 py-4 text-center text-xs text-zinc-400">項目がありません</p>
           ) : (
             column.cards.map((card) => (
-              <Card key={card.id} card={card} onOpen={onOpenCard} />
+              <Card
+                key={card.id}
+                card={card}
+                expectedMinutes={column.expectedMinutes}
+                onOpen={onOpenCard}
+              />
             ))
           )}
         </SortableContext>
