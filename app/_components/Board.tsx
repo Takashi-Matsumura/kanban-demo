@@ -10,20 +10,21 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
-import type { BoardColumn } from "@/lib/board";
+import type { BoardColumn, BoardProduct } from "@/lib/board";
 import { moveCard } from "../actions";
 
 type Props = {
   initial: BoardColumn[];
+  products: BoardProduct[];
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial }: Props) {
+export function Board({ initial, products }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -130,9 +131,18 @@ export function Board({ initial }: Props) {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {columns.map((column) => (
-            <Column key={column.id} column={column} onOpenCard={setOpenCardId} />
+        <div className="flex items-stretch gap-2 overflow-x-auto pb-4">
+          {columns.map((column, i) => (
+            <Fragment key={column.id}>
+              <Column
+                column={column}
+                products={products}
+                onOpenCard={setOpenCardId}
+                index={i}
+                total={columns.length}
+              />
+              {i < columns.length - 1 ? <FlowArrow /> : null}
+            </Fragment>
           ))}
         </div>
         <DragOverlay>{activeCard ? <Card card={activeCard} dragging /> : null}</DragOverlay>
@@ -144,6 +154,17 @@ export function Board({ initial }: Props) {
           onClose={() => setOpenCardId(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function FlowArrow() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none flex shrink-0 items-center pt-10 text-zinc-300"
+    >
+      ▶
     </div>
   );
 }

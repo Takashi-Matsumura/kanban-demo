@@ -7,23 +7,45 @@ generator client {
 }
 
 model Column {
-  id          String  @id @default(cuid())
-  name        String
-  description String?
-  color       String
-  order       Int
-  cards       Card[]
+  id              String  @id @default(cuid())
+  name            String
+  description     String?
+  color           String
+  order           Int
+  stageType       String? @unique
+  expectedMinutes Int?
+  cards           Card[]
+}
+
+model Product {
+  id                String  @id @default(cuid())
+  name              String
+  sku               String  @unique
+  category          String
+  defaultPlannedQty Int?
+  cards             Card[]
 }
 
 model Card {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   description String?
   order       Float
   columnId    String
-  column      Column   @relation(fields: [columnId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  column      Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  lotCode     String?   @unique
+  productId   String?
+  product     Product?  @relation(fields: [productId], references: [id])
+  plannedQty  Int?
+  actualQty   Int?
+  batchDate   DateTime?
+  shift       String?
+  assignee    String?
+  priority    String    @default("normal")
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([columnId, order])
+  @@index([productId])
 }
