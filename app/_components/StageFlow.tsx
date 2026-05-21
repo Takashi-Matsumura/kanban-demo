@@ -1,3 +1,5 @@
+"use client";
+
 import { Fragment } from "react";
 import type { DashboardStage } from "@/lib/dashboard";
 
@@ -30,19 +32,36 @@ const COLOR_DOT: Record<string, string> = {
 
 type Props = {
   stages: DashboardStage[];
+  /** true のとき、ノードをボタン化し、クリックで対応する Column 要素 (#stage-col-<id>) までスムーズスクロールする */
+  clickable?: boolean;
 };
 
-export function StageFlow({ stages }: Props) {
+export function StageFlow({ stages, clickable = false }: Props) {
+  function handleClick(stageId: string) {
+    if (typeof document === "undefined") return;
+    const target = document.getElementById(`stage-col-${stageId}`);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <div className="flex items-end justify-between">
         <h3 className="text-sm font-semibold text-zinc-800">本日の製造フロー</h3>
-        <p className="text-[10px] text-zinc-500">原材料 ▶ 出荷</p>
+        <p className="text-[10px] text-zinc-500">
+          {clickable ? "工程をクリックすると下のボードがその工程までスクロールします" : "原材料 ▶ 出荷"}
+        </p>
       </div>
       <div className="mt-3 flex items-stretch">
         {stages.map((stage, i) => (
           <Fragment key={stage.id}>
-            <StageNode stage={stage} index={i} />
+            <StageNode
+              stage={stage}
+              index={i}
+              clickable={clickable}
+              onClick={() => handleClick(stage.id)}
+            />
             {i < stages.length - 1 ? <FlowArrow active={stage.cardCount > 0} /> : null}
           </Fragment>
         ))}
@@ -51,7 +70,17 @@ export function StageFlow({ stages }: Props) {
   );
 }
 
-function StageNode({ stage, index }: { stage: DashboardStage; index: number }) {
+function StageNode({
+  stage,
+  index,
+  clickable,
+  onClick,
+}: {
+  stage: DashboardStage;
+  index: number;
+  clickable: boolean;
+  onClick: () => void;
+}) {
   const empty = stage.cardCount === 0;
   const boxClass = empty
     ? "border border-dashed border-zinc-200 bg-zinc-50"
@@ -60,10 +89,9 @@ function StageNode({ stage, index }: { stage: DashboardStage; index: number }) {
     ? "text-zinc-300"
     : COLOR_VALUE[stage.color] ?? "text-zinc-700";
   const dotClass = COLOR_DOT[stage.color] ?? "bg-zinc-400";
-  return (
-    <div
-      className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-2 transition ${boxClass}`}
-    >
+
+  const content = (
+    <>
       <div className="flex items-center gap-1">
         <span className="font-mono text-[10px] text-zinc-400">{index + 1}</span>
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} />
@@ -72,8 +100,25 @@ function StageNode({ stage, index }: { stage: DashboardStage; index: number }) {
         {stage.name}
       </p>
       <p className={`text-2xl font-semibold leading-none ${valueClass}`}>{stage.cardCount}</p>
-    </div>
+    </>
   );
+
+  const baseClass = `flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-2 transition ${boxClass}`;
+
+  if (clickable) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={`${stage.name} 工程へスクロール`}
+        className={`${baseClass} cursor-pointer hover:-translate-y-0.5 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={baseClass}>{content}</div>;
 }
 
 function FlowArrow({ active }: { active: boolean }) {

@@ -24,7 +24,7 @@ export default async function BoardPage() {
           <span className="text-sm text-zinc-500">合計 {total} バッチ</span>
         </div>
         <div className="mt-4">
-          <StageFlow stages={flowStages} />
+          <StageFlow stages={flowStages} clickable />
         </div>
       </div>
       <Board initial={columns} products={products} />

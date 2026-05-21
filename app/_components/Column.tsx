@@ -31,7 +31,8 @@ export function Column({ column, products, index, total, onOpenCard }: Props) {
   return (
     <section
       ref={setNodeRef}
-      className={`flex w-64 shrink-0 flex-col rounded-lg border bg-zinc-100/60 ${
+      id={`stage-col-${column.id}`}
+      className={`flex w-64 shrink-0 scroll-mx-6 flex-col rounded-lg border bg-zinc-100/60 ${
         isOver ? "border-blue-400" : "border-zinc-200"
       }`}
     >
