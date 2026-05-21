@@ -1,9 +1,13 @@
-import { getBoard, getProducts } from "@/lib/board";
+import { getBoard, getEquipments, getProducts } from "@/lib/board";
 import { Board } from "../_components/Board";
 import { StageFlow } from "../_components/StageFlow";
 
 export default async function BoardPage() {
-  const [columns, products] = await Promise.all([getBoard(), getProducts()]);
+  const [columns, products, equipments] = await Promise.all([
+    getBoard(),
+    getProducts(),
+    getEquipments(),
+  ]);
   const total = columns.reduce((sum, col) => sum + col.cards.length, 0);
   const flowStages = columns.map((c) => ({
     id: c.id,
@@ -27,7 +31,7 @@ export default async function BoardPage() {
           <StageFlow stages={flowStages} clickable />
         </div>
       </div>
-      <Board initial={columns} products={products} />
+      <Board initial={columns} products={products} equipments={equipments} />
     </main>
   );
 }

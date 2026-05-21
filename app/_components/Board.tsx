@@ -14,17 +14,18 @@ import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "r
 import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
-import type { BoardColumn, BoardProduct } from "@/lib/board";
+import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard } from "../actions";
 
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
+  equipments: BoardEquipment[];
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products }: Props) {
+export function Board({ initial, products, equipments }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -151,6 +152,8 @@ export function Board({ initial, products }: Props) {
         <CardDetail
           key={openCard.id}
           card={openCard}
+          stageType={columns.find((c) => c.id === openCard.columnId)?.stageType ?? null}
+          equipments={equipments}
           onClose={() => setOpenCardId(null)}
         />
       ) : null}

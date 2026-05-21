@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import type { BoardCard } from "@/lib/board";
-import { deleteCard, updateBatchMeta } from "../actions";
+import type { BoardCard, BoardEquipment } from "@/lib/board";
+import { equipmentTypeForStage } from "@/lib/stage-equipment";
+import {
+  deleteCard,
+  overrideTargetReadyAt,
+  setEquipmentForCard,
+  updateBatchMeta,
+} from "../actions";
 
 type Props = {
   card: BoardCard;
+  stageType?: string | null;
+  equipments?: BoardEquipment[];
   onClose: () => void;
 };
 
@@ -30,7 +38,18 @@ function toDateInput(iso: string | null): string {
   return `${y}-${m}-${day}`;
 }
 
-export function CardDetail({ card, onClose }: Props) {
+function toDateTimeInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${mo}-${da}T${hh}:${mm}`;
+}
+
+export function CardDetail({ card, stageType, equipments = [], onClose }: Props) {
   const [plannedQty, setPlannedQty] = useState(card.plannedQty?.toString() ?? "");
   const [actualQty, setActualQty] = useState(card.actualQty?.toString() ?? "");
   const [assignee, setAssignee] = useState(card.assignee ?? "");
@@ -39,7 +58,15 @@ export function CardDetail({ card, onClose }: Props) {
   const [batchDate, setBatchDate] = useState(toDateInput(card.batchDate));
   const [note, setNote] = useState(card.note ?? "");
   const [description, setDescription] = useState(card.description ?? "");
+  const [equipmentId, setEquipmentId] = useState(card.equipment?.id ?? "");
+  const [targetReadyAt, setTargetReadyAt] = useState(toDateTimeInput(card.targetReadyAt));
   const [, startTransition] = useTransition();
+
+  const requiredEquipmentType = equipmentTypeForStage(stageType ?? null);
+  const showEquipmentSection = requiredEquipmentType != null;
+  const candidateEquipments = requiredEquipmentType
+    ? equipments.filter((e) => e.type === requiredEquipmentType)
+    : [];
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -98,6 +125,20 @@ export function CardDetail({ card, onClose }: Props) {
       await deleteCard(card.id);
     });
     onClose();
+  }
+
+  function commitEquipment(next: string) {
+    setEquipmentId(next);
+    startTransition(async () => {
+      await setEquipmentForCard(card.id, next === "" ? null : next);
+    });
+  }
+
+  function commitTargetReadyAt(next: string) {
+    setTargetReadyAt(next);
+    startTransition(async () => {
+      await overrideTargetReadyAt(card.id, next === "" ? null : new Date(next).toISOString());
+    });
   }
 
   return (
@@ -216,6 +257,54 @@ export function CardDetail({ card, onClose }: Props) {
               />
             </Field>
           </FieldRow>
+
+          {showEquipmentSection ? (
+            <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3">
+              <h3 className="text-xs font-semibold text-emerald-800">
+                {requiredEquipmentType === "proofer" ? "ホイロ割当・目標完了時刻" : "オーブン割当・目標完了時刻"}
+              </h3>
+              <FieldRow>
+                <Field label="使用設備">
+                  <select
+                    value={equipmentId}
+                    onChange={(e) => commitEquipment(e.target.value)}
+                    className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">（未割当）</option>
+                    {candidateEquipments.map((eq) => (
+                      <option key={eq.id} value={eq.id}>
+                        {eq.name}
+                        {eq.capacity != null ? `（最大 ${eq.capacity}）` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="目標完了時刻（上書き）">
+                  <div className="flex gap-1">
+                    <input
+                      type="datetime-local"
+                      value={targetReadyAt}
+                      onChange={(e) => commitTargetReadyAt(e.target.value)}
+                      className="flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                    />
+                    {targetReadyAt ? (
+                      <button
+                        type="button"
+                        onClick={() => commitTargetReadyAt("")}
+                        className="rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-600 hover:bg-zinc-100"
+                        aria-label="目標時刻をクリア"
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </div>
+                </Field>
+              </FieldRow>
+              <p className="mt-2 text-[10px] text-emerald-700">
+                目標完了時刻が未設定のときは「工程入室時刻 + 標準時間」をタイマー基準とします。
+              </p>
+            </div>
+          ) : null}
 
           <div className="mt-4">
             <label className="block text-xs font-semibold text-zinc-600">現場メモ・特記事項</label>

@@ -22,12 +22,21 @@ const PRODUCTS = [
   { name: "メロンパン", sku: "SWEET-002", category: "菓子パン", defaultPlannedQty: 120 },
 ];
 
+const EQUIPMENTS = [
+  { name: "ホイロ 1 号", type: "proofer", capacity: 4 },
+  { name: "ホイロ 2 号", type: "proofer", capacity: 4 },
+  { name: "オーブン A", type: "oven", capacity: 2 },
+  { name: "オーブン B", type: "oven", capacity: 2 },
+  { name: "オーブン C", type: "oven", capacity: 2 },
+];
+
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60 * 1000);
 
 async function main() {
   // 既存データを全消去してから入れ直す（デモ用シード）。
   await prisma.stageHistory.deleteMany();
   await prisma.card.deleteMany();
+  await prisma.equipment.deleteMany();
   await prisma.product.deleteMany();
   await prisma.column.deleteMany();
 
@@ -37,8 +46,10 @@ async function main() {
   for (const product of PRODUCTS) {
     await prisma.product.create({ data: product });
   }
+  for (const eq of EQUIPMENTS) {
+    await prisma.equipment.create({ data: eq });
+  }
 
-  // 全ステージを取得して順序を確定
   const stagesInOrder = await prisma.column.findMany({ orderBy: { order: "asc" } });
   const stageByType = new Map(stagesInOrder.map((s) => [s.stageType ?? "", s]));
 
@@ -47,8 +58,10 @@ async function main() {
   const anpan = await prisma.product.findUnique({ where: { sku: "SWEET-001" } });
   const croissant = await prisma.product.findUnique({ where: { sku: "PASTRY-001" } });
 
-  // ── 現在進行中バッチ（3 件） ──────────────────────────────────────────
-  // 角食パン: 仕込工程に 10 分前から滞在
+  const proofer1 = await prisma.equipment.findFirst({ where: { name: "ホイロ 1 号" } });
+  const ovenA = await prisma.equipment.findFirst({ where: { name: "オーブン A" } });
+
+  // 角食パン: 仕込 10 分前から
   if (shokupan && stageByType.get("mixing")) {
     const mixing = stageByType.get("mixing")!;
     const enteredAt = minutesAgo(10);
@@ -72,7 +85,7 @@ async function main() {
     });
   }
 
-  // フランスパン: 仕込 → 一次発酵に進んで 20 分滞在中（仕込履歴は完了）
+  // フランスパン: 一次発酵中（ホイロ 1 号、残り 40 分）
   if (french && stageByType.get("firstProof") && stageByType.get("mixing")) {
     const mixing = stageByType.get("mixing")!;
     const firstProof = stageByType.get("firstProof")!;
@@ -87,6 +100,7 @@ async function main() {
         order: 1024,
         lotCode: "2026-05-22-朝-フランス01",
         productId: french.id,
+        equipmentId: proofer1?.id ?? null,
         plannedQty: 80,
         batchDate: new Date("2026-05-22T00:00:00"),
         shift: "morning",
@@ -110,13 +124,13 @@ async function main() {
     });
   }
 
-  // あんパン: 焼成中（前 6 工程は通過済み、現在は 5 分前から焼成中）
+  // あんパン: 焼成中（オーブン A、残り 2 分） — 標準 30 分のうち 28 分経過
   if (anpan && stageByType.get("bake")) {
     const bake = stageByType.get("bake")!;
-    const enteredAt = minutesAgo(5);
+    const enteredAt = minutesAgo(28);
 
     const previousStageTypes = ["mixing", "firstProof", "divide", "bench", "mold", "finalProof"];
-    let cursor = new Date(Date.now() - (5 + 195) * 60 * 1000); // 焼成 5 分前 + 過去 195 分
+    let cursor = new Date(Date.now() - (28 + 195) * 60 * 1000);
 
     const card = await prisma.card.create({
       data: {
@@ -125,6 +139,7 @@ async function main() {
         order: 1024,
         lotCode: "2026-05-22-朝-あんパン01",
         productId: anpan.id,
+        equipmentId: ovenA?.id ?? null,
         plannedQty: 120,
         batchDate: new Date("2026-05-22T00:00:00"),
         shift: "morning",
@@ -156,11 +171,11 @@ async function main() {
     });
   }
 
-  // ── 完了済みバッチ（昨日 1 件） — 平均滞留時間の元データに ───────────
+  // クロワッサン: 昨日完了 → 出荷工程
   if (croissant) {
     const ship = stageByType.get("ship");
     if (!ship) return;
-    const startedAt = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 時間前
+    const startedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const card = await prisma.card.create({
       data: {
@@ -175,14 +190,14 @@ async function main() {
         shift: "morning",
         assignee: "高橋",
         priority: "normal",
-        currentStageEnteredAt: startedAt, // 後で更新
+        currentStageEnteredAt: startedAt,
       },
     });
 
     let cursor = startedAt;
     let lastEnteredAt = startedAt;
     for (const stage of stagesInOrder) {
-      const mins = (stage.expectedMinutes ?? 20) + Math.floor(Math.random() * 6) - 2; // 標準±2 分の揺らぎ
+      const mins = (stage.expectedMinutes ?? 20) + Math.floor(Math.random() * 6) - 2;
       const entered = new Date(cursor);
       const left = new Date(cursor.getTime() + mins * 60 * 1000);
       const isLast = stage.id === ship.id;

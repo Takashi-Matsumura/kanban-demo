@@ -5,6 +5,7 @@ import type {
   CardRow,
   ColumnRow,
   DbSnapshot,
+  EquipmentRow,
   ProductRow,
   StageHistoryRow,
 } from "@/lib/db-snapshot";
@@ -44,6 +45,7 @@ function cardSig(card: CardRow) {
     card.columnId,
     card.lotCode ?? "",
     card.productId ?? "",
+    card.equipmentId ?? "",
     card.plannedQty ?? "",
     card.actualQty ?? "",
     card.batchDate ?? "",
@@ -52,8 +54,13 @@ function cardSig(card: CardRow) {
     card.priority,
     card.note ?? "",
     card.currentStageEnteredAt,
+    card.targetReadyAt ?? "",
     card.updatedAt,
   ].join("|");
+}
+
+function equipmentSig(e: EquipmentRow) {
+  return [e.name, e.type, e.capacity ?? "", e.isActive].join("|");
 }
 
 function historySig(h: StageHistoryRow) {
@@ -85,6 +92,10 @@ function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
   const prevHist = new Map(prev.histories.map((h) => [h.id, historySig(h)]));
   for (const h of next.histories) {
     if (prevHist.get(h.id) !== historySig(h)) out.add(`hist:${h.id}`);
+  }
+  const prevEq = new Map(prev.equipments.map((e) => [e.id, equipmentSig(e)]));
+  for (const e of next.equipments) {
+    if (prevEq.get(e.id) !== equipmentSig(e)) out.add(`eq:${e.id}`);
   }
   return out;
 }
@@ -119,6 +130,9 @@ export function DbInspector({ snapshot }: Props) {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ColumnTable rows={snapshot.columns} highlights={highlights} />
           <ProductTable rows={snapshot.products} highlights={highlights} />
+        </div>
+        <div className="mt-6">
+          <EquipmentTable rows={snapshot.equipments} highlights={highlights} />
         </div>
         <div className="mt-6">
           <CardTable rows={snapshot.cards} highlights={highlights} />
@@ -243,8 +257,10 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
               <Th>actual</Th>
               <Th>assignee</Th>
               <Th>priority</Th>
+              <Th>equipmentId</Th>
               <Th>order</Th>
               <Th>enteredAt</Th>
+              <Th>targetReadyAt</Th>
               <Th>updatedAt</Th>
             </tr>
           </thead>
@@ -265,12 +281,59 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
                 <Td mono>{row.actualQty ?? <span className="text-zinc-400">NULL</span>}</Td>
                 <Td>{nullable(row.assignee)}</Td>
                 <Td>{row.priority}</Td>
+                <Td mono>{nullable(row.equipmentId)}</Td>
                 <Td mono>{row.order}</Td>
                 <Td mono>{formatDate(row.currentStageEnteredAt)}</Td>
+                <Td mono>{row.targetReadyAt ? formatDate(row.targetReadyAt) : <span className="text-zinc-400">NULL</span>}</Td>
                 <Td mono>{formatDate(row.updatedAt)}</Td>
               </tr>
             ))}
-            {rows.length === 0 ? <EmptyRow colSpan={12} /> : null}
+            {rows.length === 0 ? <EmptyRow colSpan={14} /> : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function EquipmentTable({ rows, highlights }: TableProps<EquipmentRow>) {
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold text-zinc-800">
+        Equipment テーブル <span className="text-zinc-500">({rows.length} 行)</span>
+      </h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        設備マスタ。<code className="rounded bg-zinc-100 px-1 py-0.5">type</code> が
+        <code className="ml-1 rounded bg-zinc-100 px-1 py-0.5">proofer</code> ならホイロ、
+        <code className="ml-1 rounded bg-zinc-100 px-1 py-0.5">oven</code> ならオーブン。
+      </p>
+      <div className="overflow-x-auto rounded border border-zinc-200">
+        <table className="min-w-full text-xs">
+          <thead className="bg-zinc-50 text-left text-zinc-600">
+            <tr>
+              <Th>id</Th>
+              <Th>name</Th>
+              <Th>type</Th>
+              <Th>capacity</Th>
+              <Th>isActive</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`eq:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
+                <Td mono>{row.id}</Td>
+                <Td>{row.name}</Td>
+                <Td mono>{row.type}</Td>
+                <Td mono>{row.capacity ?? <span className="text-zinc-400">NULL</span>}</Td>
+                <Td>{row.isActive ? "true" : "false"}</Td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <EmptyRow colSpan={5} /> : null}
           </tbody>
         </table>
       </div>

@@ -73,6 +73,7 @@ export function Column({ column, products, index, total, onOpenCard }: Props) {
                 key={card.id}
                 card={card}
                 expectedMinutes={column.expectedMinutes}
+                stageType={column.stageType}
                 onOpen={onOpenCard}
               />
             ))

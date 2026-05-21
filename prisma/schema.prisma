@@ -27,6 +27,15 @@ model Product {
   cards             Card[]
 }
 
+model Equipment {
+  id       String  @id @default(cuid())
+  name     String
+  type     String
+  capacity Int?
+  isActive Boolean @default(true)
+  cards    Card[]
+}
+
 model Card {
   id                    String         @id @default(cuid())
   title                 String
@@ -37,6 +46,8 @@ model Card {
   lotCode               String?        @unique
   productId             String?
   product               Product?       @relation(fields: [productId], references: [id])
+  equipmentId           String?
+  equipment             Equipment?     @relation(fields: [equipmentId], references: [id])
   plannedQty            Int?
   actualQty             Int?
   batchDate             DateTime?
@@ -45,12 +56,14 @@ model Card {
   priority              String         @default("normal")
   note                  String?
   currentStageEnteredAt DateTime       @default(now())
+  targetReadyAt         DateTime?
   histories             StageHistory[]
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 
   @@index([columnId, order])
   @@index([productId])
+  @@index([equipmentId])
 }
 
 model StageHistory {
