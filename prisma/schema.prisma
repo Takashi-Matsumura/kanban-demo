@@ -7,14 +7,15 @@ generator client {
 }
 
 model Column {
-  id              String  @id @default(cuid())
+  id              String         @id @default(cuid())
   name            String
   description     String?
   color           String
   order           Int
-  stageType       String? @unique
+  stageType       String?        @unique
   expectedMinutes Int?
   cards           Card[]
+  histories       StageHistory[]
 }
 
 model Product {
@@ -27,25 +28,42 @@ model Product {
 }
 
 model Card {
-  id          String    @id @default(cuid())
-  title       String
-  description String?
-  order       Float
-  columnId    String
-  column      Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
-  lotCode     String?   @unique
-  productId   String?
-  product     Product?  @relation(fields: [productId], references: [id])
-  plannedQty  Int?
-  actualQty   Int?
-  batchDate   DateTime?
-  shift       String?
-  assignee    String?
-  priority    String    @default("normal")
-  note        String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                    String         @id @default(cuid())
+  title                 String
+  description           String?
+  order                 Float
+  columnId              String
+  column                Column         @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  lotCode               String?        @unique
+  productId             String?
+  product               Product?       @relation(fields: [productId], references: [id])
+  plannedQty            Int?
+  actualQty             Int?
+  batchDate             DateTime?
+  shift                 String?
+  assignee              String?
+  priority              String         @default("normal")
+  note                  String?
+  currentStageEnteredAt DateTime       @default(now())
+  histories             StageHistory[]
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   @@index([columnId, order])
   @@index([productId])
+}
+
+model StageHistory {
+  id          String    @id @default(cuid())
+  cardId      String
+  card        Card      @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  columnId    String
+  column      Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  enteredAt   DateTime  @default(now())
+  leftAt      DateTime?
+  durationSec Int?
+  byUser      String?
+
+  @@index([cardId, enteredAt])
+  @@index([columnId, enteredAt])
 }
