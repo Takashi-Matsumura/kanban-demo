@@ -14,16 +14,17 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
-import type { BoardColumn } from "@/lib/board";
+import type { BoardColumn, BoardProduct } from "@/lib/board";
 import { moveCard } from "../actions";
 
 type Props = {
   initial: BoardColumn[];
+  products: BoardProduct[];
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial }: Props) {
+export function Board({ initial, products }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -132,7 +133,7 @@ export function Board({ initial }: Props) {
       >
         <div className="flex gap-4 overflow-x-auto pb-4">
           {columns.map((column) => (
-            <Column key={column.id} column={column} onOpenCard={setOpenCardId} />
+            <Column key={column.id} column={column} products={products} onOpenCard={setOpenCardId} />
           ))}
         </div>
         <DragOverlay>{activeCard ? <Card card={activeCard} dragging /> : null}</DragOverlay>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { CardRow, ColumnRow, DbSnapshot } from "@/lib/db-snapshot";
+import type { CardRow, ColumnRow, DbSnapshot, ProductRow } from "@/lib/db-snapshot";
 
 type Props = {
   snapshot: DbSnapshot;
@@ -16,16 +16,45 @@ const dateFormatter = new Intl.DateTimeFormat("ja-JP", {
   second: "2-digit",
 });
 
+const dateOnlyFormatter = new Intl.DateTimeFormat("ja-JP", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function formatDate(iso: string) {
   return dateFormatter.format(new Date(iso));
 }
 
+function formatDateOnly(iso: string) {
+  return dateOnlyFormatter.format(new Date(iso));
+}
+
 function cardSig(card: CardRow) {
-  return [card.title, card.description ?? "", card.order, card.columnId, card.updatedAt].join("|");
+  return [
+    card.title,
+    card.description ?? "",
+    card.order,
+    card.columnId,
+    card.lotCode ?? "",
+    card.productId ?? "",
+    card.plannedQty ?? "",
+    card.actualQty ?? "",
+    card.batchDate ?? "",
+    card.shift ?? "",
+    card.assignee ?? "",
+    card.priority,
+    card.note ?? "",
+    card.updatedAt,
+  ].join("|");
 }
 
 function columnSig(col: ColumnRow) {
-  return [col.name, col.description ?? "", col.color, col.order].join("|");
+  return [col.name, col.description ?? "", col.color, col.order, col.stageType ?? "", col.expectedMinutes ?? ""].join("|");
+}
+
+function productSig(p: ProductRow) {
+  return [p.name, p.sku, p.category, p.defaultPlannedQty ?? ""].join("|");
 }
 
 function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
@@ -38,14 +67,15 @@ function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
   for (const c of next.columns) {
     if (prevCols.get(c.id) !== columnSig(c)) out.add(`col:${c.id}`);
   }
+  const prevProducts = new Map(prev.products.map((p) => [p.id, productSig(p)]));
+  for (const p of next.products) {
+    if (prevProducts.get(p.id) !== productSig(p)) out.add(`product:${p.id}`);
+  }
   return out;
 }
 
 export function DbInspector({ snapshot }: Props) {
-  // 直近で変化した行 id 集合（"card:<id>" / "col:<id>"）
   const [highlights, setHighlights] = useState<Set<string>>(new Set());
-  // 前回スナップショットを state として保持し、render-time で diff を取る
-  // （React 公式の "Storing information from previous renders" パターン。useEffect 内の setState を避ける）
   const [prevSnapshot, setPrevSnapshot] = useState(snapshot);
 
   if (prevSnapshot !== snapshot) {
@@ -54,7 +84,6 @@ export function DbInspector({ snapshot }: Props) {
     if (diff.size > 0) setHighlights(diff);
   }
 
-  // ハイライトは 2 秒で自然に消す
   useEffect(() => {
     if (highlights.size === 0) return;
     const t = setTimeout(() => setHighlights(new Set()), 2000);
@@ -68,12 +97,15 @@ export function DbInspector({ snapshot }: Props) {
           <h2 className="text-base font-semibold text-zinc-900">データベース (SQLite)</h2>
           <p className="mt-1 text-xs text-zinc-500">
             画面上のカンバンが、実際にどのようなテーブル・行として SQLite に保存されているかをリアルタイムで表示します。
-            上部でカードの追加・編集・移動を行うと、下のテーブルも更新され、変更行が一瞬黄色く光ります。
+            上部でバッチの追加・編集・移動を行うと、下のテーブルも更新され、変更行が一瞬黄色く光ります。
           </p>
         </header>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ColumnTable rows={snapshot.columns} highlights={highlights} />
+          <ProductTable rows={snapshot.products} highlights={highlights} />
+        </div>
+        <div className="mt-6">
           <CardTable rows={snapshot.cards} highlights={highlights} />
         </div>
       </div>
@@ -92,16 +124,17 @@ function ColumnTable({ rows, highlights }: TableProps<ColumnRow>) {
       <h3 className="mb-2 text-sm font-semibold text-zinc-800">
         Column テーブル <span className="text-zinc-500">({rows.length} 行)</span>
       </h3>
-      <p className="mb-2 text-xs text-zinc-500">列（Todo / In Progress / Done）の定義を保持。</p>
+      <p className="mb-2 text-xs text-zinc-500">製造ラインの工程定義。stageType と expectedMinutes（標準滞留分）を保持。</p>
       <div className="overflow-x-auto rounded border border-zinc-200">
         <table className="min-w-full text-xs">
           <thead className="bg-zinc-50 text-left text-zinc-600">
             <tr>
               <Th>id</Th>
               <Th>name</Th>
-              <Th>description</Th>
+              <Th>stageType</Th>
               <Th>color</Th>
               <Th>order</Th>
+              <Th>expectedMin</Th>
             </tr>
           </thead>
           <tbody>
@@ -114,9 +147,51 @@ function ColumnTable({ rows, highlights }: TableProps<ColumnRow>) {
               >
                 <Td mono>{row.id}</Td>
                 <Td>{row.name}</Td>
-                <Td>{nullable(row.description)}</Td>
+                <Td mono>{nullable(row.stageType)}</Td>
                 <Td>{row.color}</Td>
                 <Td mono>{row.order}</Td>
+                <Td mono>{row.expectedMinutes ?? <span className="text-zinc-400">NULL</span>}</Td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <EmptyRow colSpan={6} /> : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ProductTable({ rows, highlights }: TableProps<ProductRow>) {
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold text-zinc-800">
+        Product テーブル <span className="text-zinc-500">({rows.length} 行)</span>
+      </h3>
+      <p className="mb-2 text-xs text-zinc-500">製品マスタ。バッチ（Card）が外部キーで参照する。</p>
+      <div className="overflow-x-auto rounded border border-zinc-200">
+        <table className="min-w-full text-xs">
+          <thead className="bg-zinc-50 text-left text-zinc-600">
+            <tr>
+              <Th>id</Th>
+              <Th>name</Th>
+              <Th>sku</Th>
+              <Th>category</Th>
+              <Th>defaultQty</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`product:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
+                <Td mono>{row.id}</Td>
+                <Td>{row.name}</Td>
+                <Td mono>{row.sku}</Td>
+                <Td>{row.category}</Td>
+                <Td mono>{row.defaultPlannedQty ?? <span className="text-zinc-400">NULL</span>}</Td>
               </tr>
             ))}
             {rows.length === 0 ? <EmptyRow colSpan={5} /> : null}
@@ -134,20 +209,23 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
         Card テーブル <span className="text-zinc-500">({rows.length} 行)</span>
       </h3>
       <p className="mb-2 text-xs text-zinc-500">
-        カード本体。<code className="rounded bg-zinc-100 px-1 py-0.5">columnId</code> が
-        Column テーブルの <code className="rounded bg-zinc-100 px-1 py-0.5">id</code>{" "}
-        を参照（外部キー）。
+        製造バッチ本体。<code className="rounded bg-zinc-100 px-1 py-0.5">columnId</code> は工程を、
+        <code className="ml-1 rounded bg-zinc-100 px-1 py-0.5">productId</code> は製品を参照。
       </p>
       <div className="overflow-x-auto rounded border border-zinc-200">
         <table className="min-w-full text-xs">
           <thead className="bg-zinc-50 text-left text-zinc-600">
             <tr>
-              <Th>id</Th>
-              <Th>title</Th>
-              <Th>description</Th>
-              <Th>order</Th>
+              <Th>lotCode</Th>
+              <Th>productId</Th>
               <Th>columnId</Th>
-              <Th>createdAt</Th>
+              <Th>shift</Th>
+              <Th>batchDate</Th>
+              <Th>planned</Th>
+              <Th>actual</Th>
+              <Th>assignee</Th>
+              <Th>priority</Th>
+              <Th>order</Th>
               <Th>updatedAt</Th>
             </tr>
           </thead>
@@ -159,16 +237,20 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
                   highlights.has(`card:${row.id}`) ? "bg-yellow-100" : ""
                 }`}
               >
-                <Td mono>{row.id}</Td>
-                <Td>{row.title}</Td>
-                <Td>{nullable(row.description)}</Td>
-                <Td mono>{row.order}</Td>
+                <Td mono>{nullable(row.lotCode)}</Td>
+                <Td mono>{nullable(row.productId)}</Td>
                 <Td mono>{row.columnId}</Td>
-                <Td mono>{formatDate(row.createdAt)}</Td>
+                <Td>{nullable(row.shift)}</Td>
+                <Td mono>{row.batchDate ? formatDateOnly(row.batchDate) : <span className="text-zinc-400">NULL</span>}</Td>
+                <Td mono>{row.plannedQty ?? <span className="text-zinc-400">NULL</span>}</Td>
+                <Td mono>{row.actualQty ?? <span className="text-zinc-400">NULL</span>}</Td>
+                <Td>{nullable(row.assignee)}</Td>
+                <Td>{row.priority}</Td>
+                <Td mono>{row.order}</Td>
                 <Td mono>{formatDate(row.updatedAt)}</Td>
               </tr>
             ))}
-            {rows.length === 0 ? <EmptyRow colSpan={7} /> : null}
+            {rows.length === 0 ? <EmptyRow colSpan={11} /> : null}
           </tbody>
         </table>
       </div>

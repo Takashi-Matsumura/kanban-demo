@@ -12,6 +12,24 @@ type Props = {
   onOpen?: (cardId: string) => void;
 };
 
+const SHIFT_LABEL: Record<string, string> = {
+  morning: "朝",
+  noon: "昼",
+  evening: "夕",
+};
+
+const PRIORITY_STYLE: Record<string, string> = {
+  high: "bg-red-100 text-red-700 border-red-200",
+  normal: "bg-zinc-100 text-zinc-600 border-zinc-200",
+  low: "bg-zinc-50 text-zinc-500 border-zinc-200",
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  high: "高",
+  normal: "通常",
+  low: "低",
+};
+
 export function Card({ card, dragging, onOpen }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -25,13 +43,18 @@ export function Card({ card, dragging, onOpen }: Props) {
   };
 
   function onDelete() {
-    if (!confirm("このカードを削除しますか？")) return;
+    if (!confirm("このバッチを削除しますか？")) return;
     startTransition(async () => {
       await deleteCard(card.id);
     });
   }
 
   const openable = !dragging && onOpen;
+  const productName = card.product?.name ?? card.title;
+  const shiftLabel = card.shift ? SHIFT_LABEL[card.shift] : null;
+  const priority = card.priority ?? "normal";
+  const priorityStyle = PRIORITY_STYLE[priority] ?? PRIORITY_STYLE.normal;
+  const priorityLabel = PRIORITY_LABEL[priority] ?? priority;
 
   return (
     <article
@@ -55,8 +78,33 @@ export function Card({ card, dragging, onOpen }: Props) {
         </button>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-zinc-900">{card.title}</p>
-          {card.description ? (
+          {card.lotCode ? (
+            <p className="font-mono text-[11px] leading-tight text-zinc-500">{card.lotCode}</p>
+          ) : null}
+          <p className="text-sm font-medium text-zinc-900">
+            {productName}
+            {shiftLabel ? <span className="ml-1 text-xs text-zinc-500">{shiftLabel}便</span> : null}
+          </p>
+
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+            {card.plannedQty != null ? (
+              <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-zinc-700">
+                {card.actualQty != null ? `${card.actualQty}/${card.plannedQty}` : card.plannedQty} 個
+              </span>
+            ) : null}
+            {card.assignee ? (
+              <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                担当: {card.assignee}
+              </span>
+            ) : null}
+            <span className={`rounded border px-1.5 py-0.5 ${priorityStyle}`}>
+              {priorityLabel}
+            </span>
+          </div>
+
+          {card.note ? (
+            <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{card.note}</p>
+          ) : card.description ? (
             <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{card.description}</p>
           ) : null}
         </div>

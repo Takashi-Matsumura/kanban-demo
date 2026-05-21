@@ -4,10 +4,11 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { useDroppable } from "@dnd-kit/core";
 import { Card } from "./Card";
 import { AddCardForm } from "./AddCardForm";
-import type { BoardColumn } from "@/lib/board";
+import type { BoardColumn, BoardProduct } from "@/lib/board";
 
 type Props = {
   column: BoardColumn;
+  products: BoardProduct[];
   onOpenCard?: (cardId: string) => void;
 };
 
@@ -15,9 +16,12 @@ const COLOR_DOT: Record<string, string> = {
   green: "bg-green-500",
   amber: "bg-amber-500",
   purple: "bg-purple-500",
+  sky: "bg-sky-500",
+  blue: "bg-blue-500",
+  red: "bg-red-500",
 };
 
-export function Column({ column, onOpenCard }: Props) {
+export function Column({ column, products, onOpenCard }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const cardIds = column.cards.map((c) => c.id);
   const dotClass = COLOR_DOT[column.color] ?? "bg-zinc-400";
@@ -55,7 +59,7 @@ export function Column({ column, onOpenCard }: Props) {
       </div>
 
       <div className="border-t border-zinc-200 p-2">
-        <AddCardForm columnId={column.id} />
+        <AddCardForm columnId={column.id} products={products} />
       </div>
     </section>
   );
