@@ -22,6 +22,22 @@ const PRODUCTS = [
   { name: "メロンパン", sku: "SWEET-002", category: "菓子パン", defaultPlannedQty: 120 },
 ];
 
+const ALLERGENS = [
+  { code: "wheat", name: "小麦", icon: "小" },
+  { code: "egg", name: "卵", icon: "卵" },
+  { code: "milk", name: "乳", icon: "乳" },
+  { code: "soy", name: "大豆", icon: "大豆" },
+  { code: "walnut", name: "くるみ", icon: "胡桃" },
+];
+
+const PRODUCT_ALLERGENS: Record<string, string[]> = {
+  "BREAD-001": ["wheat", "milk", "egg"],
+  "FRENCH-001": ["wheat"],
+  "PASTRY-001": ["wheat", "milk", "egg"],
+  "SWEET-001": ["wheat", "milk", "egg", "soy"],
+  "SWEET-002": ["wheat", "milk", "egg"],
+};
+
 const EQUIPMENTS = [
   { name: "ホイロ 1 号", type: "proofer", capacity: 4 },
   { name: "ホイロ 2 号", type: "proofer", capacity: 4 },
@@ -33,10 +49,13 @@ const EQUIPMENTS = [
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60 * 1000);
 
 async function main() {
-  // 既存データを全消去してから入れ直す（デモ用シード）。
+  // 子テーブルから順に削除
+  await prisma.qualityCheck.deleteMany();
   await prisma.stageHistory.deleteMany();
+  await prisma.productAllergen.deleteMany();
   await prisma.card.deleteMany();
   await prisma.equipment.deleteMany();
+  await prisma.allergen.deleteMany();
   await prisma.product.deleteMany();
   await prisma.column.deleteMany();
 
@@ -48,6 +67,25 @@ async function main() {
   }
   for (const eq of EQUIPMENTS) {
     await prisma.equipment.create({ data: eq });
+  }
+  for (const al of ALLERGENS) {
+    await prisma.allergen.create({ data: al });
+  }
+
+  // 製品 × アレルゲンの関連付け
+  const productList = await prisma.product.findMany();
+  const allergenByCode = new Map(
+    (await prisma.allergen.findMany()).map((a) => [a.code, a]),
+  );
+  for (const p of productList) {
+    const codes = PRODUCT_ALLERGENS[p.sku] ?? [];
+    for (const code of codes) {
+      const a = allergenByCode.get(code);
+      if (!a) continue;
+      await prisma.productAllergen.create({
+        data: { productId: p.id, allergenId: a.id },
+      });
+    }
   }
 
   const stagesInOrder = await prisma.column.findMany({ orderBy: { order: "asc" } });
@@ -61,7 +99,7 @@ async function main() {
   const proofer1 = await prisma.equipment.findFirst({ where: { name: "ホイロ 1 号" } });
   const ovenA = await prisma.equipment.findFirst({ where: { name: "オーブン A" } });
 
-  // 角食パン: 仕込 10 分前から
+  // 角食パン: 仕込 10 分前
   if (shokupan && stageByType.get("mixing")) {
     const mixing = stageByType.get("mixing")!;
     const enteredAt = minutesAgo(10);
@@ -83,9 +121,21 @@ async function main() {
     await prisma.stageHistory.create({
       data: { cardId: card.id, columnId: mixing.id, enteredAt },
     });
+    await prisma.qualityCheck.create({
+      data: {
+        cardId: card.id,
+        columnId: mixing.id,
+        type: "temperature",
+        value: "26",
+        passed: true,
+        note: "生地温度（℃）",
+        byUser: "田中",
+        checkedAt: minutesAgo(8),
+      },
+    });
   }
 
-  // フランスパン: 一次発酵中（ホイロ 1 号、残り 40 分）
+  // フランスパン: 一次発酵中
   if (french && stageByType.get("firstProof") && stageByType.get("mixing")) {
     const mixing = stageByType.get("mixing")!;
     const firstProof = stageByType.get("firstProof")!;
@@ -122,9 +172,33 @@ async function main() {
         { cardId: card.id, columnId: firstProof.id, enteredAt: proofEntered },
       ],
     });
+    await prisma.qualityCheck.createMany({
+      data: [
+        {
+          cardId: card.id,
+          columnId: mixing.id,
+          type: "temperature",
+          value: "25",
+          passed: true,
+          note: "生地温度（℃）",
+          byUser: "佐藤",
+          checkedAt: minutesAgo(40),
+        },
+        {
+          cardId: card.id,
+          columnId: firstProof.id,
+          type: "humidity",
+          value: "75",
+          passed: true,
+          note: "ホイロ湿度（%）",
+          byUser: "佐藤",
+          checkedAt: minutesAgo(18),
+        },
+      ],
+    });
   }
 
-  // あんパン: 焼成中（オーブン A、残り 2 分） — 標準 30 分のうち 28 分経過
+  // あんパン: 焼成中（残り 2 分）
   if (anpan && stageByType.get("bake")) {
     const bake = stageByType.get("bake")!;
     const enteredAt = minutesAgo(28);
@@ -169,9 +243,22 @@ async function main() {
     await prisma.stageHistory.create({
       data: { cardId: card.id, columnId: bake.id, enteredAt },
     });
+
+    await prisma.qualityCheck.create({
+      data: {
+        cardId: card.id,
+        columnId: bake.id,
+        type: "temperature",
+        value: "92",
+        passed: true,
+        note: "中心温度（℃）",
+        byUser: "鈴木",
+        checkedAt: minutesAgo(1),
+      },
+    });
   }
 
-  // クロワッサン: 昨日完了 → 出荷工程
+  // クロワッサン: 昨日完了
   if (croissant) {
     const ship = stageByType.get("ship");
     if (!ship) return;
@@ -217,6 +304,46 @@ async function main() {
       where: { id: card.id },
       data: { currentStageEnteredAt: lastEnteredAt },
     });
+
+    // クロワッサンには複数の品質チェック（昨日分）
+    const inspect = stageByType.get("inspect");
+    const bake = stageByType.get("bake");
+    if (inspect && bake) {
+      await prisma.qualityCheck.createMany({
+        data: [
+          {
+            cardId: card.id,
+            columnId: bake.id,
+            type: "temperature",
+            value: "94",
+            passed: true,
+            note: "中心温度（℃）",
+            byUser: "高橋",
+            checkedAt: new Date(Date.now() - 8 * 60 * 60 * 1000),
+          },
+          {
+            cardId: card.id,
+            columnId: inspect.id,
+            type: "weight",
+            value: "65",
+            passed: true,
+            note: "重量サンプル平均（g）",
+            byUser: "高橋",
+            checkedAt: new Date(Date.now() - 4 * 60 * 60 * 1000),
+          },
+          {
+            cardId: card.id,
+            columnId: inspect.id,
+            type: "visual",
+            value: "層構造良好",
+            passed: true,
+            note: "焼き色・層の確認",
+            byUser: "高橋",
+            checkedAt: new Date(Date.now() - 4 * 60 * 60 * 1000),
+          },
+        ],
+      });
+    }
   }
 }
 

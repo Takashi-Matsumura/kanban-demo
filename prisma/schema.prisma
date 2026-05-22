@@ -16,15 +16,34 @@ model Column {
   expectedMinutes Int?
   cards           Card[]
   histories       StageHistory[]
+  qualityChecks   QualityCheck[]
 }
 
 model Product {
-  id                String  @id @default(cuid())
+  id                String            @id @default(cuid())
   name              String
-  sku               String  @unique
+  sku               String            @unique
   category          String
   defaultPlannedQty Int?
   cards             Card[]
+  allergens         ProductAllergen[]
+}
+
+model Allergen {
+  id       String            @id @default(cuid())
+  code     String            @unique
+  name     String
+  icon     String?
+  products ProductAllergen[]
+}
+
+model ProductAllergen {
+  productId  String
+  allergenId String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  allergen   Allergen @relation(fields: [allergenId], references: [id], onDelete: Cascade)
+
+  @@id([productId, allergenId])
 }
 
 model Equipment {
@@ -58,6 +77,7 @@ model Card {
   currentStageEnteredAt DateTime       @default(now())
   targetReadyAt         DateTime?
   histories             StageHistory[]
+  qualityChecks         QualityCheck[]
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 
@@ -79,4 +99,21 @@ model StageHistory {
 
   @@index([cardId, enteredAt])
   @@index([columnId, enteredAt])
+}
+
+model QualityCheck {
+  id        String   @id @default(cuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  columnId  String
+  column    Column   @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  type      String
+  value     String?
+  passed    Boolean
+  note      String?
+  byUser    String?
+  checkedAt DateTime @default(now())
+
+  @@index([cardId, checkedAt])
+  @@index([columnId, checkedAt])
 }

@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import type {
+  AllergenRow,
   CardRow,
   ColumnRow,
   DbSnapshot,
   EquipmentRow,
+  ProductAllergenRow,
   ProductRow,
+  QualityCheckRow,
   StageHistoryRow,
 } from "@/lib/db-snapshot";
 
@@ -75,6 +78,16 @@ function productSig(p: ProductRow) {
   return [p.name, p.sku, p.category, p.defaultPlannedQty ?? ""].join("|");
 }
 
+function allergenSig(a: AllergenRow) {
+  return [a.code, a.name, a.icon ?? ""].join("|");
+}
+
+function qualitySig(q: QualityCheckRow) {
+  return [q.cardId, q.columnId, q.type, q.value ?? "", q.passed, q.note ?? "", q.checkedAt].join(
+    "|",
+  );
+}
+
 function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
   const out = new Set<string>();
   const prevCards = new Map(prev.cards.map((c) => [c.id, cardSig(c)]));
@@ -96,6 +109,14 @@ function diffHighlights(prev: DbSnapshot, next: DbSnapshot): Set<string> {
   const prevEq = new Map(prev.equipments.map((e) => [e.id, equipmentSig(e)]));
   for (const e of next.equipments) {
     if (prevEq.get(e.id) !== equipmentSig(e)) out.add(`eq:${e.id}`);
+  }
+  const prevAl = new Map(prev.allergens.map((a) => [a.id, allergenSig(a)]));
+  for (const a of next.allergens) {
+    if (prevAl.get(a.id) !== allergenSig(a)) out.add(`al:${a.id}`);
+  }
+  const prevQ = new Map(prev.qualityChecks.map((q) => [q.id, qualitySig(q)]));
+  for (const q of next.qualityChecks) {
+    if (prevQ.get(q.id) !== qualitySig(q)) out.add(`q:${q.id}`);
   }
   return out;
 }
@@ -131,14 +152,25 @@ export function DbInspector({ snapshot }: Props) {
           <ColumnTable rows={snapshot.columns} highlights={highlights} />
           <ProductTable rows={snapshot.products} highlights={highlights} />
         </div>
-        <div className="mt-6">
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <AllergenTable rows={snapshot.allergens} highlights={highlights} />
           <EquipmentTable rows={snapshot.equipments} highlights={highlights} />
+        </div>
+        <div className="mt-6">
+          <ProductAllergenTable
+            rows={snapshot.productAllergens}
+            allergens={snapshot.allergens}
+            products={snapshot.products}
+          />
         </div>
         <div className="mt-6">
           <CardTable rows={snapshot.cards} highlights={highlights} />
         </div>
         <div className="mt-6">
           <StageHistoryTable rows={snapshot.histories} highlights={highlights} />
+        </div>
+        <div className="mt-6">
+          <QualityCheckTable rows={snapshot.qualityChecks} highlights={highlights} />
         </div>
       </div>
     </section>
@@ -289,6 +321,147 @@ function CardTable({ rows, highlights }: TableProps<CardRow>) {
               </tr>
             ))}
             {rows.length === 0 ? <EmptyRow colSpan={14} /> : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AllergenTable({ rows, highlights }: TableProps<AllergenRow>) {
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold text-zinc-800">
+        Allergen テーブル <span className="text-zinc-500">({rows.length} 行)</span>
+      </h3>
+      <p className="mb-2 text-xs text-zinc-500">アレルゲンマスタ。製品との関係は ProductAllergen で N:N。</p>
+      <div className="overflow-x-auto rounded border border-zinc-200">
+        <table className="min-w-full text-xs">
+          <thead className="bg-zinc-50 text-left text-zinc-600">
+            <tr>
+              <Th>id</Th>
+              <Th>code</Th>
+              <Th>name</Th>
+              <Th>icon</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`al:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
+                <Td mono>{row.id}</Td>
+                <Td mono>{row.code}</Td>
+                <Td>{row.name}</Td>
+                <Td>{nullable(row.icon)}</Td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <EmptyRow colSpan={4} /> : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ProductAllergenTable({
+  rows,
+  allergens,
+  products,
+}: {
+  rows: ProductAllergenRow[];
+  allergens: AllergenRow[];
+  products: ProductRow[];
+}) {
+  const productName = new Map(products.map((p) => [p.id, p.name]));
+  const allergenName = new Map(allergens.map((a) => [a.id, a.name]));
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold text-zinc-800">
+        ProductAllergen 中間表 <span className="text-zinc-500">({rows.length} 行)</span>
+      </h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        製品 × アレルゲンの N:N 関係。複合主キー <code className="rounded bg-zinc-100 px-1 py-0.5">(productId, allergenId)</code>。
+      </p>
+      <div className="overflow-x-auto rounded border border-zinc-200">
+        <table className="min-w-full text-xs">
+          <thead className="bg-zinc-50 text-left text-zinc-600">
+            <tr>
+              <Th>productId</Th>
+              <Th>product</Th>
+              <Th>allergenId</Th>
+              <Th>allergen</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={`${row.productId}:${row.allergenId}:${i}`} className="border-t border-zinc-200">
+                <Td mono>{row.productId}</Td>
+                <Td>{productName.get(row.productId) ?? "—"}</Td>
+                <Td mono>{row.allergenId}</Td>
+                <Td>{allergenName.get(row.allergenId) ?? "—"}</Td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <EmptyRow colSpan={4} /> : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function QualityCheckTable({ rows, highlights }: TableProps<QualityCheckRow>) {
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold text-zinc-800">
+        QualityCheck テーブル <span className="text-zinc-500">(直近 {rows.length} 行)</span>
+      </h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        バッチの品質・衛生チェック記録。<code className="rounded bg-zinc-100 px-1 py-0.5">type</code> は
+        temperature / humidity / weight / visual。
+      </p>
+      <div className="overflow-x-auto rounded border border-zinc-200">
+        <table className="min-w-full text-xs">
+          <thead className="bg-zinc-50 text-left text-zinc-600">
+            <tr>
+              <Th>cardId</Th>
+              <Th>columnId</Th>
+              <Th>type</Th>
+              <Th>value</Th>
+              <Th>passed</Th>
+              <Th>note</Th>
+              <Th>byUser</Th>
+              <Th>checkedAt</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className={`border-t border-zinc-200 transition-colors duration-700 ${
+                  highlights.has(`q:${row.id}`) ? "bg-yellow-100" : ""
+                }`}
+              >
+                <Td mono>{row.cardId}</Td>
+                <Td mono>{row.columnId}</Td>
+                <Td mono>{row.type}</Td>
+                <Td mono>{nullable(row.value)}</Td>
+                <Td>
+                  {row.passed ? (
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">true</span>
+                  ) : (
+                    <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700">false</span>
+                  )}
+                </Td>
+                <Td>{nullable(row.note)}</Td>
+                <Td>{nullable(row.byUser)}</Td>
+                <Td mono>{formatDate(row.checkedAt)}</Td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <EmptyRow colSpan={8} /> : null}
           </tbody>
         </table>
       </div>
