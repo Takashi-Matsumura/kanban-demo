@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/", label: "ダッシュボード" },
   { href: "/board", label: "工程詳細" },
+  { href: "/kpi", label: "振り返り" },
   { href: "/db", label: "データベース" },
 ];
 
