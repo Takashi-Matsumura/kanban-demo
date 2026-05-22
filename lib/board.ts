@@ -4,11 +4,19 @@ import { equipmentTypeForStage } from "./stage-equipment";
 
 export { equipmentTypeForStage };
 
+export type BoardAllergen = {
+  id: string;
+  code: string;
+  name: string;
+  icon: string | null;
+};
+
 export type BoardProduct = {
   id: string;
   name: string;
   sku: string;
   category: string;
+  allergens: BoardAllergen[];
 };
 
 export type BoardEquipment = {
@@ -16,6 +24,25 @@ export type BoardEquipment = {
   name: string;
   type: string;
   capacity: number | null;
+};
+
+export type BoardQualityCheck = {
+  id: string;
+  columnId: string;
+  type: string;
+  value: string | null;
+  passed: boolean;
+  note: string | null;
+  byUser: string | null;
+  checkedAt: string;
+};
+
+export type BoardStageHistory = {
+  id: string;
+  columnId: string;
+  enteredAt: string;
+  leftAt: string | null;
+  durationSec: number | null;
 };
 
 export type BoardCard = {
@@ -36,6 +63,9 @@ export type BoardCard = {
   note: string | null;
   currentStageEnteredAt: string;
   targetReadyAt: string | null;
+  qualityChecks: BoardQualityCheck[];
+  histories: BoardStageHistory[];
+  hasFailedQuality: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -70,7 +100,12 @@ export async function getBoard(): Promise<BoardColumn[]> {
       include: {
         cards: {
           orderBy: { order: "asc" },
-          include: { product: true, equipment: true },
+          include: {
+            product: { include: { allergens: { include: { allergen: true } } } },
+            equipment: true,
+            qualityChecks: { orderBy: { checkedAt: "desc" } },
+            histories: { orderBy: { enteredAt: "asc" } },
+          },
         },
       },
     }),
@@ -121,6 +156,12 @@ export async function getBoard(): Promise<BoardColumn[]> {
               name: card.product.name,
               sku: card.product.sku,
               category: card.product.category,
+              allergens: card.product.allergens.map((pa) => ({
+                id: pa.allergen.id,
+                code: pa.allergen.code,
+                name: pa.allergen.name,
+                icon: pa.allergen.icon,
+              })),
             }
           : null,
         equipment: card.equipment
@@ -140,6 +181,24 @@ export async function getBoard(): Promise<BoardColumn[]> {
         note: card.note,
         currentStageEnteredAt: card.currentStageEnteredAt.toISOString(),
         targetReadyAt: card.targetReadyAt ? card.targetReadyAt.toISOString() : null,
+        qualityChecks: card.qualityChecks.map((q) => ({
+          id: q.id,
+          columnId: q.columnId,
+          type: q.type,
+          value: q.value,
+          passed: q.passed,
+          note: q.note,
+          byUser: q.byUser,
+          checkedAt: q.checkedAt.toISOString(),
+        })),
+        histories: card.histories.map((h) => ({
+          id: h.id,
+          columnId: h.columnId,
+          enteredAt: h.enteredAt.toISOString(),
+          leftAt: h.leftAt ? h.leftAt.toISOString() : null,
+          durationSec: h.durationSec,
+        })),
+        hasFailedQuality: card.qualityChecks.some((q) => !q.passed),
         createdAt: card.createdAt.toISOString(),
         updatedAt: card.updatedAt.toISOString(),
       })),
@@ -152,12 +211,21 @@ export async function getProducts(): Promise<BoardProduct[]> {
   cacheLife("max");
   cacheTag("board");
 
-  const products = await prisma.product.findMany({ orderBy: { name: "asc" } });
+  const products = await prisma.product.findMany({
+    orderBy: { name: "asc" },
+    include: { allergens: { include: { allergen: true } } },
+  });
   return products.map((p) => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
     category: p.category,
+    allergens: p.allergens.map((pa) => ({
+      id: pa.allergen.id,
+      code: pa.allergen.code,
+      name: pa.allergen.name,
+      icon: pa.allergen.icon,
+    })),
   }));
 }
 

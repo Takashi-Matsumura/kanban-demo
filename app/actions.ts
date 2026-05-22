@@ -140,6 +140,38 @@ export async function overrideTargetReadyAt(cardId: string, isoOrNull: string | 
   updateTag("board");
 }
 
+export async function addQualityCheck(args: {
+  cardId: string;
+  columnId: string;
+  type: string;
+  value?: string | null;
+  passed: boolean;
+  note?: string | null;
+  byUser?: string | null;
+}) {
+  const value = args.value && args.value.trim() !== "" ? args.value.trim() : null;
+  const note = args.note && args.note.trim() !== "" ? args.note.trim() : null;
+  const byUser = args.byUser && args.byUser.trim() !== "" ? args.byUser.trim() : null;
+
+  await prisma.qualityCheck.create({
+    data: {
+      cardId: args.cardId,
+      columnId: args.columnId,
+      type: args.type,
+      value,
+      passed: args.passed,
+      note,
+      byUser,
+    },
+  });
+  updateTag("board");
+}
+
+export async function deleteQualityCheck(id: string) {
+  await prisma.qualityCheck.delete({ where: { id } });
+  updateTag("board");
+}
+
 export async function deleteCard(cardId: string) {
   await prisma.card.delete({ where: { id: cardId } });
   updateTag("board");

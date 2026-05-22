@@ -19,6 +19,18 @@ export type ProductRow = {
   defaultPlannedQty: number | null;
 };
 
+export type AllergenRow = {
+  id: string;
+  code: string;
+  name: string;
+  icon: string | null;
+};
+
+export type ProductAllergenRow = {
+  productId: string;
+  allergenId: string;
+};
+
 export type EquipmentRow = {
   id: string;
   name: string;
@@ -59,12 +71,27 @@ export type StageHistoryRow = {
   byUser: string | null;
 };
 
+export type QualityCheckRow = {
+  id: string;
+  cardId: string;
+  columnId: string;
+  type: string;
+  value: string | null;
+  passed: boolean;
+  note: string | null;
+  byUser: string | null;
+  checkedAt: string;
+};
+
 export type DbSnapshot = {
   columns: ColumnRow[];
   products: ProductRow[];
+  allergens: AllergenRow[];
+  productAllergens: ProductAllergenRow[];
   equipments: EquipmentRow[];
   cards: CardRow[];
   histories: StageHistoryRow[];
+  qualityChecks: QualityCheckRow[];
 };
 
 export async function getDbSnapshot(): Promise<DbSnapshot> {
@@ -72,13 +99,17 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
   cacheLife("max");
   cacheTag("board");
 
-  const [columns, products, equipments, cards, histories] = await Promise.all([
-    prisma.column.findMany({ orderBy: { order: "asc" } }),
-    prisma.product.findMany({ orderBy: { name: "asc" } }),
-    prisma.equipment.findMany({ orderBy: [{ type: "asc" }, { name: "asc" }] }),
-    prisma.card.findMany({ orderBy: [{ columnId: "asc" }, { order: "asc" }] }),
-    prisma.stageHistory.findMany({ orderBy: { enteredAt: "desc" }, take: 50 }),
-  ]);
+  const [columns, products, allergens, productAllergens, equipments, cards, histories, qualityChecks] =
+    await Promise.all([
+      prisma.column.findMany({ orderBy: { order: "asc" } }),
+      prisma.product.findMany({ orderBy: { name: "asc" } }),
+      prisma.allergen.findMany({ orderBy: { name: "asc" } }),
+      prisma.productAllergen.findMany(),
+      prisma.equipment.findMany({ orderBy: [{ type: "asc" }, { name: "asc" }] }),
+      prisma.card.findMany({ orderBy: [{ columnId: "asc" }, { order: "asc" }] }),
+      prisma.stageHistory.findMany({ orderBy: { enteredAt: "desc" }, take: 50 }),
+      prisma.qualityCheck.findMany({ orderBy: { checkedAt: "desc" }, take: 50 }),
+    ]);
 
   return {
     columns: columns.map((c) => ({
@@ -96,6 +127,16 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       sku: p.sku,
       category: p.category,
       defaultPlannedQty: p.defaultPlannedQty,
+    })),
+    allergens: allergens.map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      icon: a.icon,
+    })),
+    productAllergens: productAllergens.map((pa) => ({
+      productId: pa.productId,
+      allergenId: pa.allergenId,
     })),
     equipments: equipments.map((e) => ({
       id: e.id,
@@ -133,6 +174,17 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       leftAt: h.leftAt ? h.leftAt.toISOString() : null,
       durationSec: h.durationSec,
       byUser: h.byUser,
+    })),
+    qualityChecks: qualityChecks.map((q) => ({
+      id: q.id,
+      cardId: q.cardId,
+      columnId: q.columnId,
+      type: q.type,
+      value: q.value,
+      passed: q.passed,
+      note: q.note,
+      byUser: q.byUser,
+      checkedAt: q.checkedAt.toISOString(),
     })),
   };
 }

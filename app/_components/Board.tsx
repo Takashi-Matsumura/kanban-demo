@@ -152,6 +152,7 @@ export function Board({ initial, products, equipments }: Props) {
         <CardDetail
           key={openCard.id}
           card={openCard}
+          columns={columns}
           stageType={columns.find((c) => c.id === openCard.columnId)?.stageType ?? null}
           equipments={equipments}
           onClose={() => setOpenCardId(null)}

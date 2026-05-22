@@ -84,13 +84,30 @@ export function Card({ card, dragging, expectedMinutes, stageType, onOpen }: Pro
         </button>
 
         <div className="flex-1 min-w-0">
-          {card.lotCode ? (
-            <p className="font-mono text-[11px] leading-tight text-zinc-500">{card.lotCode}</p>
-          ) : null}
-          <p className="text-sm font-medium text-zinc-900">
-            {productName}
-            {shiftLabel ? <span className="ml-1 text-xs text-zinc-500">{shiftLabel}便</span> : null}
-          </p>
+          <div className="flex items-start justify-between gap-1">
+            <div className="min-w-0 flex-1">
+              {card.lotCode ? (
+                <p className="font-mono text-[11px] leading-tight text-zinc-500">{card.lotCode}</p>
+              ) : null}
+              <p className="text-sm font-medium text-zinc-900">
+                {productName}
+                {shiftLabel ? <span className="ml-1 text-xs text-zinc-500">{shiftLabel}便</span> : null}
+              </p>
+            </div>
+            {card.product?.allergens && card.product.allergens.length > 0 ? (
+              <div className="flex shrink-0 flex-wrap justify-end gap-0.5">
+                {card.product.allergens.map((a) => (
+                  <span
+                    key={a.id}
+                    title={`含むアレルゲン: ${a.name}`}
+                    className="rounded border border-rose-200 bg-rose-50 px-1 text-[9px] leading-tight text-rose-700"
+                  >
+                    {a.icon ?? a.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
             {card.plannedQty != null ? (
