@@ -1,12 +1,19 @@
 import { Fragment } from "react";
 import { getDashboardSummary } from "@/lib/dashboard";
+import type { DashboardAttention } from "@/lib/dashboard";
 import { TodayLabel } from "./_components/TodayLabel";
 import { StageFlow } from "./_components/StageFlow";
 
-const SHIFT_LABEL: Record<string, string> = {
-  morning: "朝便",
-  noon: "昼便",
-  evening: "夕便",
+const REASON_LABEL: Record<DashboardAttention["reasons"][number], string> = {
+  overdue: "標準超過",
+  failedQuality: "品質不合格",
+  noEquipment: "設備未割当",
+};
+
+const REASON_STYLE: Record<DashboardAttention["reasons"][number], string> = {
+  overdue: "bg-red-100 text-red-700 border-red-200",
+  failedQuality: "bg-rose-100 text-rose-700 border-rose-200",
+  noEquipment: "bg-amber-100 text-amber-800 border-amber-200",
 };
 
 const COLOR_DOT: Record<string, string> = {
@@ -18,31 +25,10 @@ const COLOR_DOT: Record<string, string> = {
   red: "bg-red-500",
 };
 
-const COLOR_BAR: Record<string, string> = {
-  green: "bg-green-400",
-  amber: "bg-amber-400",
-  purple: "bg-purple-400",
-  sky: "bg-sky-400",
-  blue: "bg-blue-400",
-  red: "bg-red-400",
-};
-
-const PRIORITY_STYLE: Record<string, string> = {
-  high: "bg-red-100 text-red-700 border-red-200",
-  normal: "bg-zinc-100 text-zinc-600 border-zinc-200",
-  low: "bg-zinc-50 text-zinc-500 border-zinc-200",
-};
-
-const PRIORITY_LABEL: Record<string, string> = {
-  high: "高",
-  normal: "通常",
-  low: "低",
-};
-
 export default async function DashboardPage() {
   const summary = await getDashboardSummary();
-  const maxStageCount = Math.max(1, ...summary.stages.map((s) => s.cardCount));
   const maxProductCount = Math.max(1, ...summary.products.map((p) => p.cardCount));
+  const maxAllergenCount = Math.max(1, ...summary.allergens.map((a) => a.cardCount));
 
   return (
     <main className="flex-1 px-6 py-4">
@@ -58,23 +44,50 @@ export default async function DashboardPage() {
 
         <div className="grid grid-cols-4 gap-3">
           <KpiCard label="本日の合計バッチ" value={summary.totals.total} accent="zinc" />
-          <KpiCard label="高優先度" value={summary.totals.highPriority} accent="red" />
+          <KpiCard
+            label="要注意バッチ"
+            value={summary.totals.attention}
+            accent={summary.totals.attention > 0 ? "red" : "zinc"}
+            footer="標準超過 / 品質不合格 / 設備未割当"
+          />
           <KpiCard label="進行中" value={summary.totals.inProgress} accent="blue" />
           <KpiCard label="出荷済" value={summary.totals.shipped} accent="green" />
         </div>
 
-        <StageFlow stages={summary.stages} />
+        <StageFlow stages={summary.stages} showStats />
 
-        <div className="grid flex-1 grid-cols-2 gap-3 min-h-0">
+        <div className="grid flex-1 grid-cols-3 gap-3 min-h-0">
+          <section className="col-span-2 flex flex-col rounded-lg border border-zinc-200 bg-white p-4">
+            <div className="flex items-end justify-between">
+              <h3 className="text-sm font-semibold text-zinc-800">要注意バッチ</h3>
+              <p className="text-[10px] text-zinc-500">
+                {summary.attentions.length === 0
+                  ? "問題なし"
+                  : `${summary.totals.attention} 件中 上位 ${summary.attentions.length} 件`}
+              </p>
+            </div>
+            {summary.attentions.length === 0 ? (
+              <p className="mt-3 text-xs text-emerald-600">
+                すべてのバッチが標準時間内で進行中、品質も合格、設備も割当済みです
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-1.5 overflow-y-auto text-sm">
+                {summary.attentions.map((a) => (
+                  <AttentionRow key={a.id} a={a} />
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="flex flex-col rounded-lg border border-zinc-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-zinc-800">製品別バッチ数</h3>
-            <div className="mt-3 grid grid-cols-[7rem_1fr_2.5rem] items-center gap-x-3 gap-y-1.5 text-sm">
+            <h3 className="text-sm font-semibold text-zinc-800">製品別 / アレルゲン別</h3>
+            <div className="mt-3 grid grid-cols-[5rem_1fr_2rem] items-center gap-x-2 gap-y-1 text-xs">
               {summary.products.map((p) => {
                 const pct = (p.cardCount / maxProductCount) * 100;
                 return (
                   <Fragment key={p.id}>
                     <span className="truncate text-zinc-700">{p.name}</span>
-                    <div className="h-3 overflow-hidden rounded bg-zinc-100">
+                    <div className="h-2.5 overflow-hidden rounded bg-zinc-100">
                       <div
                         className="h-full bg-zinc-400"
                         style={{ width: p.cardCount === 0 ? 0 : `${Math.max(4, pct)}%` }}
@@ -85,49 +98,35 @@ export default async function DashboardPage() {
                 );
               })}
             </div>
-          </section>
-
-          <section className="flex flex-col rounded-lg border border-zinc-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-zinc-800">直近のバッチ</h3>
-            <ul className="mt-3 flex-1 space-y-2 overflow-hidden text-sm">
-              {summary.recent.length === 0 ? (
-                <li className="text-xs text-zinc-400">バッチがまだありません</li>
+            <div className="mt-3 border-t border-zinc-100 pt-3">
+              <p className="text-[10px] text-zinc-500">進行中バッチに含まれるアレルゲン</p>
+              {summary.allergens.length === 0 ? (
+                <p className="mt-2 text-xs text-zinc-400">対象バッチなし</p>
               ) : (
-                summary.recent.map((b) => (
-                  <li
-                    key={b.id}
-                    className="flex items-center justify-between gap-2 rounded border border-zinc-100 bg-zinc-50/60 px-2 py-1.5"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-zinc-900">
-                        {b.productName}
-                        {b.shift ? (
-                          <span className="ml-1 text-xs text-zinc-500">{SHIFT_LABEL[b.shift] ?? b.shift}</span>
-                        ) : null}
-                      </p>
-                      {b.lotCode ? (
-                        <p className="truncate font-mono text-[10px] text-zinc-500">{b.lotCode}</p>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-zinc-700">
-                        {b.stageName}
-                      </span>
-                      {b.assignee ? (
-                        <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-blue-700">
-                          {b.assignee}
-                        </span>
-                      ) : null}
-                      <span
-                        className={`rounded border px-1.5 py-0.5 ${PRIORITY_STYLE[b.priority] ?? PRIORITY_STYLE.normal}`}
-                      >
-                        {PRIORITY_LABEL[b.priority] ?? b.priority}
-                      </span>
-                    </div>
-                  </li>
-                ))
+                <div className="mt-2 grid grid-cols-[5rem_1fr_2rem] items-center gap-x-2 gap-y-1 text-xs">
+                  {summary.allergens.map((a) => {
+                    const pct = (a.cardCount / maxAllergenCount) * 100;
+                    return (
+                      <Fragment key={a.id}>
+                        <div className="flex items-center gap-1">
+                          <span className="rounded border border-rose-200 bg-rose-50 px-1 text-[9px] text-rose-700">
+                            {a.icon ?? a.name}
+                          </span>
+                          <span className="truncate text-zinc-700">{a.name}</span>
+                        </div>
+                        <div className="h-2.5 overflow-hidden rounded bg-zinc-100">
+                          <div
+                            className="h-full bg-rose-300"
+                            style={{ width: a.cardCount === 0 ? 0 : `${Math.max(4, pct)}%` }}
+                          />
+                        </div>
+                        <span className="text-right font-mono text-zinc-600">{a.cardCount}</span>
+                      </Fragment>
+                    );
+                  })}
+                </div>
               )}
-            </ul>
+            </div>
           </section>
         </div>
       </div>
@@ -135,14 +134,50 @@ export default async function DashboardPage() {
   );
 }
 
+function AttentionRow({ a }: { a: DashboardAttention }) {
+  const dotClass = COLOR_DOT[a.stageColor] ?? "bg-zinc-400";
+  return (
+    <li className="flex items-center justify-between gap-2 rounded border border-zinc-200 bg-zinc-50/60 px-2 py-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} />
+          <span className="text-xs text-zinc-500">{a.stageName}</span>
+          {a.assignee ? (
+            <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700">
+              {a.assignee}
+            </span>
+          ) : null}
+        </div>
+        <p className="truncate text-sm text-zinc-900">{a.productName}</p>
+        {a.lotCode ? (
+          <p className="truncate font-mono text-[10px] text-zinc-500">{a.lotCode}</p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        {a.reasons.map((r) => (
+          <span
+            key={r}
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${REASON_STYLE[r]}`}
+          >
+            {REASON_LABEL[r]}
+            {r === "overdue" && a.overdueMinutes != null ? ` +${a.overdueMinutes}分` : ""}
+          </span>
+        ))}
+      </div>
+    </li>
+  );
+}
+
 function KpiCard({
   label,
   value,
   accent,
+  footer,
 }: {
   label: string;
   value: number;
   accent: "zinc" | "red" | "blue" | "green";
+  footer?: string;
 }) {
   const accentClass = {
     zinc: "text-zinc-900",
@@ -154,6 +189,7 @@ function KpiCard({
     <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
       <p className="text-xs text-zinc-500">{label}</p>
       <p className={`mt-1 text-3xl font-semibold ${accentClass}`}>{value}</p>
+      {footer ? <p className="mt-1 text-[10px] text-zinc-500">{footer}</p> : null}
     </div>
   );
 }

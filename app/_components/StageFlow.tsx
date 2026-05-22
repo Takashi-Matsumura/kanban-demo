@@ -34,9 +34,11 @@ type Props = {
   stages: DashboardStage[];
   /** true のとき、ノードをボタン化し、クリックで対応する Column 要素 (#stage-col-<id>) までスムーズスクロールする */
   clickable?: boolean;
+  /** true のとき、各ノード下に「平均 m 分 / 標準 n 分」のサブテキストを表示 */
+  showStats?: boolean;
 };
 
-export function StageFlow({ stages, clickable = false }: Props) {
+export function StageFlow({ stages, clickable = false, showStats = false }: Props) {
   function handleClick(stageId: string) {
     if (typeof document === "undefined") return;
     const target = document.getElementById(`stage-col-${stageId}`);
@@ -60,6 +62,7 @@ export function StageFlow({ stages, clickable = false }: Props) {
               stage={stage}
               index={i}
               clickable={clickable}
+              showStats={showStats}
               onClick={() => handleClick(stage.id)}
             />
             {i < stages.length - 1 ? <FlowArrow active={stage.cardCount > 0} /> : null}
@@ -74,11 +77,13 @@ function StageNode({
   stage,
   index,
   clickable,
+  showStats,
   onClick,
 }: {
   stage: DashboardStage;
   index: number;
   clickable: boolean;
+  showStats: boolean;
   onClick: () => void;
 }) {
   const empty = stage.cardCount === 0;
@@ -100,6 +105,15 @@ function StageNode({
         {stage.name}
       </p>
       <p className={`text-2xl font-semibold leading-none ${valueClass}`}>{stage.cardCount}</p>
+      {showStats ? (
+        <p className="mt-0.5 font-mono text-[9px] leading-tight text-zinc-500">
+          {stage.avgDwellMinutes != null
+            ? `平均 ${stage.avgDwellMinutes}`
+            : "—"}
+          {stage.expectedMinutes != null ? ` / 標準 ${stage.expectedMinutes}` : ""}
+          {stage.avgDwellMinutes != null || stage.expectedMinutes != null ? " 分" : ""}
+        </p>
+      ) : null}
     </>
   );
 
