@@ -15,6 +15,8 @@ export default async function BoardPage() {
     color: c.color,
     stageType: c.stageType,
     cardCount: c.cards.length,
+    expectedMinutes: c.expectedMinutes,
+    avgDwellMinutes: c.avgDwellMinutes,
   }));
 
   return (
