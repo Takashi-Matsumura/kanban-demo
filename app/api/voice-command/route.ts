@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizeVoiceText } from "@/lib/voice-dictionary";
+import { loadVoiceContext } from "@/lib/voice-context";
 
 const LLAMA_URL = process.env.LLAMA_URL ?? "http://localhost:8080";
 const LLAMA_MODEL = process.env.LLAMA_MODEL ?? "gemma-4-e4b-it-Q4_K_M.gguf";
@@ -34,7 +35,8 @@ type LLMOutput = {
 
 function buildSystemPrompt(columns: ColumnCtx[]): string {
   const stageList = columns.map((c) => c.name).join("、");
-  return [
+  const knowledge = loadVoiceContext();
+  const lines = [
     "あなたは製パン工場のバッチ管理アシスタントです。",
     `工程は順に: ${stageList}。`,
     "ユーザーの発話を解釈し、以下のJSONを返してください。",
@@ -50,7 +52,11 @@ function buildSystemPrompt(columns: ColumnCtx[]): string {
     "}",
     "to_stage には必ず上の工程一覧の名前そのものを使うこと。",
     "to_stage と direction はどちらか一方を埋めること。両方 null なら action は unknown。",
-  ].join("\n");
+  ];
+  if (knowledge) {
+    lines.push("", "## 業務知識（以下のドキュメントに沿って解釈すること）", "", knowledge);
+  }
+  return lines.join("\n");
 }
 
 async function callLLM(transcript: string, columns: ColumnCtx[]): Promise<LLMOutput> {
