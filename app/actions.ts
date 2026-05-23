@@ -242,3 +242,13 @@ export async function moveCard(args: {
 
   updateTag("board");
 }
+
+export async function voiceMoveCard(cardId: string, toColumnId: string) {
+  const last = await prisma.card.findFirst({
+    where: { columnId: toColumnId },
+    orderBy: { order: "desc" },
+    select: { order: true },
+  });
+  const orderBefore = last?.order ?? null;
+  return moveCard({ cardId, toColumnId, orderBefore, orderAfter: null });
+}
