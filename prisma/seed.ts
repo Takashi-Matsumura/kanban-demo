@@ -48,6 +48,16 @@ const EQUIPMENTS = [
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60 * 1000);
 
+// 当日 / 前日を基準にサンプルデータの日付を動的生成する
+const toDateStr = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const TODAY = (() => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+})();
+const YESTERDAY = new Date(TODAY.getTime() - 24 * 60 * 60 * 1000);
+
 async function main() {
   // 子テーブルから順に削除
   await prisma.qualityCheck.deleteMany();
@@ -108,10 +118,10 @@ async function main() {
         title: "角食パン 朝便",
         columnId: mixing.id,
         order: 1024,
-        lotCode: "2026-05-22-朝-食パン01",
+        lotCode: `${toDateStr(TODAY)}-朝-食パン01`,
         productId: shokupan.id,
         plannedQty: 200,
-        batchDate: new Date("2026-05-22T00:00:00"),
+        batchDate: TODAY,
         shift: "morning",
         assignee: "田中",
         priority: "normal",
@@ -148,11 +158,11 @@ async function main() {
         title: "フランスパン 朝便",
         columnId: firstProof.id,
         order: 1024,
-        lotCode: "2026-05-22-朝-フランス01",
+        lotCode: `${toDateStr(TODAY)}-朝-フランス01`,
         productId: french.id,
         equipmentId: proofer1?.id ?? null,
         plannedQty: 80,
-        batchDate: new Date("2026-05-22T00:00:00"),
+        batchDate: TODAY,
         shift: "morning",
         assignee: "佐藤",
         priority: "high",
@@ -211,11 +221,11 @@ async function main() {
         title: "あんパン 朝便",
         columnId: bake.id,
         order: 1024,
-        lotCode: "2026-05-22-朝-あんパン01",
+        lotCode: `${toDateStr(TODAY)}-朝-あんパン01`,
         productId: anpan.id,
         equipmentId: ovenA?.id ?? null,
         plannedQty: 120,
-        batchDate: new Date("2026-05-22T00:00:00"),
+        batchDate: TODAY,
         shift: "morning",
         assignee: "鈴木",
         priority: "normal",
@@ -269,11 +279,11 @@ async function main() {
         title: "クロワッサン 朝便",
         columnId: ship.id,
         order: 1024,
-        lotCode: "2026-05-21-朝-クロワッサン01",
+        lotCode: `${toDateStr(YESTERDAY)}-朝-クロワッサン01`,
         productId: croissant.id,
         plannedQty: 150,
         actualQty: 148,
-        batchDate: new Date("2026-05-21T00:00:00"),
+        batchDate: YESTERDAY,
         shift: "morning",
         assignee: "高橋",
         priority: "normal",
