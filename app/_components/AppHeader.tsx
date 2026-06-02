@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 
 const TABS = [
   { href: "/", label: "ダッシュボード" },
@@ -12,6 +13,34 @@ const TABS = [
 
 export function AppHeader() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [resetting, setResetting] = useState(false);
+  const [, startTransition] = useTransition();
+
+  const onReset = async () => {
+    if (resetting) return;
+    if (
+      !window.confirm(
+        "現在の全データを削除し、当日のサンプルデータを再生成します。よろしいですか？",
+      )
+    ) {
+      return;
+    }
+    setResetting(true);
+    try {
+      const res = await fetch("/api/db-reset", { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) {
+        window.alert(data.error ?? "リセットに失敗しました");
+        return;
+      }
+      startTransition(() => router.refresh());
+    } catch (e) {
+      window.alert(`リセットに失敗しました: ${(e as Error).message}`);
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <header className="border-b border-zinc-200 bg-white">
@@ -38,6 +67,15 @@ export function AppHeader() {
             })}
           </nav>
         </div>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={resetting}
+          className="rounded border border-zinc-300 px-3 py-1 text-sm text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          title="DB を当日のサンプルデータにリセット"
+        >
+          {resetting ? "リセット中…" : "サンプルをリセット"}
+        </button>
       </div>
     </header>
   );
