@@ -62,6 +62,8 @@ LLAMA_MODEL=gemma-4-e4b-it-Q4_K_M.gguf   # 既定値。使用モデル名
 
 ## 画面構成
 
+![工程詳細画面（/board）](./docs/images/board-screenshot.png)
+
 | パス | 画面 | 概要 |
 | --- | --- | --- |
 | `/` | ダッシュボード | 本日のKPI、要注意バッチ、製品別/アレルゲン別グラフ、工程フロー |
