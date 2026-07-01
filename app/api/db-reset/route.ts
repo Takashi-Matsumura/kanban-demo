@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { seedDatabase } from "@/prisma/seedData";
 
 // DB を全削除して当日基準のサンプルデータを再生成する。
@@ -12,6 +13,9 @@ export async function POST() {
   }
   try {
     await seedDatabase();
+    // Route Handler からは updateTag が使えないため、即時失効の revalidateTag で
+    // board タグ（cacheLife: max）付きの各キャッシュを read-your-own-writes させる。
+    revalidateTag("board", { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(
