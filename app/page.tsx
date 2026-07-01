@@ -56,8 +56,8 @@ export default async function DashboardPage() {
 
         <StageFlow stages={summary.stages} showStats />
 
-        <div className="grid flex-1 grid-cols-3 gap-3 min-h-0">
-          <section className="col-span-2 flex flex-col rounded-lg border border-zinc-200 bg-white p-4">
+        <div className="grid flex-1 grid-cols-2 gap-3 min-h-0">
+          <section className="flex flex-col rounded-lg border border-zinc-200 bg-white p-4">
             <div className="flex items-end justify-between">
               <h3 className="text-sm font-semibold text-zinc-800">要注意バッチ</h3>
               <p className="text-[10px] text-zinc-500">
