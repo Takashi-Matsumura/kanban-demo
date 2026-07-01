@@ -209,6 +209,13 @@ export function Board({ initial, products, equipments }: Props) {
   const isListeningRef = useRef(speech.isListening);
   isListeningRef.current = speech.isListening;
 
+  // 音声操作デモは既定で閉じておき、本来の工程詳細（カンバン）を主役にする。
+  // BT リモートや録音開始で呼び出された時だけ自動展開し、フィードバックを見せる。
+  const [voiceDemoOpen, setVoiceDemoOpen] = useState(false);
+  useEffect(() => {
+    if (speech.isListening) setVoiceDemoOpen(true);
+  }, [speech.isListening]);
+
   const toggleVoice = useCallback(() => {
     if (isListeningRef.current) {
       speechStopRef.current();
@@ -236,23 +243,29 @@ export function Board({ initial, products, equipments }: Props) {
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
-      <VoiceCommandBar
-        btSupported={openfit.isSupported}
-        btEnabled={openfit.enabled}
-        onBtEnable={openfit.enable}
-        onBtDisable={openfit.disable}
-        btError={openfit.error}
-        speechSupported={speech.isSupported}
+      <VoiceDemoWidget
+        open={voiceDemoOpen}
+        onOpenChange={setVoiceDemoOpen}
         isListening={speech.isListening}
-        interim={speech.interim}
-        finalText={speech.finalText}
-        speechError={speech.error}
-        phase={voicePhase}
-        message={voiceMessage}
-        normalization={voiceNormalization}
-        onToggleVoice={toggleVoice}
-        onReset={resetVoice}
-      />
+      >
+        <VoiceCommandBar
+          btSupported={openfit.isSupported}
+          btEnabled={openfit.enabled}
+          onBtEnable={openfit.enable}
+          onBtDisable={openfit.disable}
+          btError={openfit.error}
+          speechSupported={speech.isSupported}
+          isListening={speech.isListening}
+          interim={speech.interim}
+          finalText={speech.finalText}
+          speechError={speech.error}
+          phase={voicePhase}
+          message={voiceMessage}
+          normalization={voiceNormalization}
+          onToggleVoice={toggleVoice}
+          onReset={resetVoice}
+        />
+      </VoiceDemoWidget>
       <DndContext
         id="kanban-board"
         sensors={sensors}
@@ -287,6 +300,70 @@ export function Board({ initial, products, equipments }: Props) {
         />
       ) : null}
     </div>
+  );
+}
+
+function VoiceDemoWidget({
+  open,
+  onOpenChange,
+  isListening,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isListening: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      {open ? (
+        <div className="fixed bottom-24 right-6 z-[60] max-h-[75vh] w-[380px] overflow-y-auto rounded-xl border border-violet-300 bg-white shadow-2xl">
+          <div className="flex items-center justify-between gap-2 rounded-t-xl border-b border-violet-200 bg-violet-50 px-3 py-2">
+            <span className="flex items-center gap-2 text-xs font-semibold text-violet-800">
+              <span className="rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                DEMO
+              </span>
+              音声操作デモ
+            </span>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              aria-label="音声操作デモを閉じる"
+              className="rounded px-1 text-violet-500 hover:bg-violet-100 hover:text-violet-800"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="p-3">
+            <p className="mb-2 text-[11px] leading-snug text-violet-600">
+              声で工程を移動できる体験機能です。本来の工程詳細（下のカンバン）とは別の実験的な操作パネルです。
+            </p>
+            {children}
+          </div>
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        className={`fixed bottom-6 right-6 z-[60] flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-semibold shadow-lg transition ${
+          open
+            ? "bg-violet-600 text-white hover:bg-violet-700"
+            : "border border-violet-300 bg-white text-violet-700 hover:bg-violet-50"
+        }`}
+      >
+        {!open ? (
+          <span className="rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+            DEMO
+          </span>
+        ) : null}
+        <span>{open ? "✕ 閉じる" : "🎤 音声操作デモ"}</span>
+        {isListening ? (
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+        ) : null}
+      </button>
+    </>
   );
 }
 
@@ -338,8 +415,8 @@ function VoiceCommandBar({
     error: "bg-red-100 text-red-700",
   };
   return (
-    <div className="mb-3 flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
         {btSupported ? (
           <button
             type="button"
@@ -375,11 +452,11 @@ function VoiceCommandBar({
         <span className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]}`}>
           {phaseLabel[phase]}
         </span>
-        <span className="ml-auto text-[11px] text-zinc-500">
-          {btEnabled ? "BT: シングル→録音 ON/OFF, ダブル→リセット。" : ""}
-          発話例: 「フランスパンを成形へ」「角食パンを次へ」
-        </span>
       </div>
+      <p className="text-[11px] leading-snug text-zinc-500">
+        {btEnabled ? "BT: シングル→録音 ON/OFF, ダブル→リセット。" : ""}
+        発話例: 「フランスパンを成形へ」「角食パンを次へ」
+      </p>
 
       {isListening || interim || finalText ? (
         <div className="rounded border border-zinc-200 bg-white px-2 py-1">
