@@ -21,7 +21,7 @@ import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard, voiceMoveCard } from "../actions";
 
-type VoicePhase = "idle" | "recording" | "processing" | "confirm" | "success" | "error";
+type VoicePhase = "idle" | "recording" | "processing" | "confirm" | "success" | "ignored" | "error";
 
 type VoiceNormalization = {
   raw: string;
@@ -34,18 +34,15 @@ type VoicePending = {
   toColumnId: string;
 };
 
-type VoiceEngine = "jev" | "llama";
-
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
   equipments: BoardEquipment[];
-  defaultVoiceEngine: VoiceEngine;
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products, equipments, defaultVoiceEngine }: Props) {
+export function Board({ initial, products, equipments }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -148,18 +145,37 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   const [voiceNormalization, setVoiceNormalization] = useState<VoiceNormalization | null>(null);
   const [voicePending, setVoicePending] = useState<VoicePending | null>(null);
   const [voiceConfidence, setVoiceConfidence] = useState<number | null>(null);
-  const [voiceLastEngine, setVoiceLastEngine] = useState<string | null>(null);
-  // 音声操作デモパネルで選べるエンジン。既定値はサーバの VOICE_ENGINE 環境変数から。
-  const [voiceEngineChoice, setVoiceEngineChoice] = useState<VoiceEngine>(defaultVoiceEngine);
-  const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
   const voicePhaseRef = useLatestRef(voicePhase);
   const voicePendingRef = useLatestRef(voicePending);
+
+  // 発話ごとの処理が終わったあと、しばらくしたら自動的に「聞いています」状態へ戻す。
+  // 常時録音中は毎回ボタンを押し直させないため。idle（セッション停止）や
+  // confirm（確認待ち）のときは上書きしない。
+  const returnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReturnToListening = useCallback(
+    (delayMs: number) => {
+      if (returnTimerRef.current) clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = setTimeout(() => {
+        returnTimerRef.current = null;
+        if (voicePhaseRef.current === "idle" || voicePhaseRef.current === "confirm") return;
+        setVoicePhase("recording");
+        setVoiceMessage(null);
+      }, delayMs);
+    },
+    [voicePhaseRef],
+  );
 
   const tts = useSpeechSynthesis({ lang: "ja-JP" });
   const ttsSpeakRef = useLatestRef(tts.speak);
   const ttsSupportedRef = useLatestRef(tts.isSupported);
 
   const handleTranscript = useCallback(async (text: string) => {
+    // 処理中・確認待ちの間に検出された発話は無視する（多重実行防止）。
+    if (voicePhaseRef.current === "processing" || voicePhaseRef.current === "confirm") return;
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
     setVoicePhase("processing");
     setVoiceMessage(null);
     setVoiceNormalization(null);
@@ -169,7 +185,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       const res = await fetch("/api/voice-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: text, engine: voiceEngineChoiceRef.current }),
+        body: JSON.stringify({ transcript: text }),
       });
       const data = await res.json();
       if (data.rawTranscript || data.normalizedTranscript) {
@@ -180,12 +196,20 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
         });
       }
       setVoiceConfidence(typeof data.confidence === "number" ? data.confidence : null);
-      setVoiceLastEngine(typeof data.engine === "string" ? data.engine : null);
       if (!data.ok) {
+        if (data.ignored) {
+          // 常時録音中に拾った、操作指示ではない発話（雑談・雑音等）。
+          // エラー扱いにはせず、読み上げもせずに静かに聞き取りへ戻る。
+          setVoicePhase("ignored");
+          setVoiceMessage(`操作指示として認識しませんでした: 「${text}」`);
+          scheduleReturnToListening(1200);
+          return;
+        }
         setVoicePhase("error");
         const msg = data.error ?? "指示を解釈できませんでした";
         setVoiceMessage(msg);
         if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+        scheduleReturnToListening(4000);
         return;
       }
       if (data.needsConfirm) {
@@ -201,13 +225,15 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       setVoicePhase("success");
       setVoiceMessage(data.message);
       if (ttsSupportedRef.current) ttsSpeakRef.current(data.message);
+      scheduleReturnToListening(2500);
     } catch (e) {
       setVoicePhase("error");
       const msg = `通信エラー: ${(e as Error).message}`;
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+      scheduleReturnToListening(4000);
     }
-  }, [voiceEngineChoiceRef, ttsSpeakRef, ttsSupportedRef]);
+  }, [ttsSpeakRef, ttsSupportedRef, voicePhaseRef, scheduleReturnToListening]);
 
   const confirmVoiceMove = useCallback(async () => {
     const pending = voicePendingRef.current;
@@ -219,28 +245,31 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       const msg = "実行しました";
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+      scheduleReturnToListening(2500);
     } catch (e) {
       setVoicePhase("error");
       const msg = `実行エラー: ${(e as Error).message}`;
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+      scheduleReturnToListening(4000);
     } finally {
       setVoicePending(null);
     }
-  }, [voicePendingRef, ttsSpeakRef, ttsSupportedRef]);
+  }, [voicePendingRef, ttsSpeakRef, ttsSupportedRef, scheduleReturnToListening]);
 
   const cancelVoiceMove = useCallback(() => {
     setVoicePending(null);
-    setVoicePhase("idle");
+    setVoicePhase("recording");
     const msg = "取消しました";
     setVoiceMessage(msg);
     if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
-  }, [ttsSpeakRef, ttsSupportedRef]);
+    scheduleReturnToListening(1500);
+  }, [ttsSpeakRef, ttsSupportedRef, scheduleReturnToListening]);
 
   const confirmVoiceMoveRef = useLatestRef(confirmVoiceMove);
   const cancelVoiceMoveRef = useLatestRef(cancelVoiceMove);
 
-  const speech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
+  const speech = useWhisperRecognition({ lang: "ja", onUtterance: handleTranscript });
   const speechStartRef = useLatestRef(speech.start);
   const speechStopRef = useLatestRef(speech.stop);
   const speechResetRef = useLatestRef(speech.reset);
@@ -251,8 +280,14 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   const [voiceDemoOpen, setVoiceDemoOpen] = useState(false);
 
   const toggleVoice = useCallback(() => {
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
     if (isListeningRef.current) {
       speechStopRef.current();
+      setVoicePhase("idle");
+      setVoiceMessage(null);
     } else {
       setVoicePhase("recording");
       setVoiceMessage(null);
@@ -263,8 +298,13 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   }, [isListeningRef, speechStartRef, speechStopRef]);
 
   const resetVoice = useCallback(() => {
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
     if (isListeningRef.current) speechStopRef.current();
     speechResetRef.current();
+    setVoicePending(null);
     setVoicePhase("idle");
     setVoiceMessage(null);
     setVoiceNormalization(null);
@@ -294,6 +334,17 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
     onNext: handleBtNext,
   });
 
+  // 「録音」ボタンは BT 連携の有効化/無効化と常時音声操作の開始/停止をまとめて行う。
+  // BT 未対応環境では BT 連携をスキップし、録音のON/OFFだけを行う。
+  const handleRecordingToggle = useCallback(() => {
+    const startingNow = !isListeningRef.current;
+    if (openfit.isSupported) {
+      if (startingNow) openfit.enable();
+      else openfit.disable();
+    }
+    toggleVoice();
+  }, [isListeningRef, toggleVoice, openfit]);
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
       <VoiceDemoWidget
@@ -302,25 +353,18 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
         isListening={speech.isListening}
       >
         <VoiceCommandBar
-          btSupported={openfit.isSupported}
-          btEnabled={openfit.enabled}
-          onBtEnable={openfit.enable}
-          onBtDisable={openfit.disable}
           btError={openfit.error}
           speechSupported={speech.isSupported}
           isListening={speech.isListening}
-          interim={speech.interim}
-          finalText={speech.finalText}
+          isSpeaking={speech.isSpeaking}
+          lastText={speech.lastText}
           speechError={speech.error}
           phase={voicePhase}
           message={voiceMessage}
           normalization={voiceNormalization}
           confidence={voiceConfidence}
-          lastEngine={voiceLastEngine}
-          engineChoice={voiceEngineChoice}
-          onEngineChoiceChange={setVoiceEngineChoice}
           pending={voicePending}
-          onToggleVoice={toggleVoice}
+          onToggleRecording={handleRecordingToggle}
           onReset={resetVoice}
           onConfirm={confirmVoiceMove}
           onCancel={cancelVoiceMove}
@@ -428,96 +472,79 @@ function VoiceDemoWidget({
 }
 
 function VoiceCommandBar({
-  btSupported,
-  btEnabled,
-  onBtEnable,
-  onBtDisable,
   btError,
   speechSupported,
   isListening,
-  interim,
-  finalText,
+  isSpeaking,
+  lastText,
   speechError,
   phase,
   message,
   normalization,
   confidence,
-  lastEngine,
-  engineChoice,
-  onEngineChoiceChange,
   pending,
-  onToggleVoice,
+  onToggleRecording,
   onReset,
   onConfirm,
   onCancel,
 }: {
-  btSupported: boolean;
-  btEnabled: boolean;
-  onBtEnable: () => void;
-  onBtDisable: () => void;
   btError: Error | null;
   speechSupported: boolean;
   isListening: boolean;
-  interim: string;
-  finalText: string;
+  isSpeaking: boolean;
+  lastText: string;
   speechError: string | null;
   phase: VoicePhase;
   message: string | null;
   normalization: VoiceNormalization | null;
   confidence: number | null;
-  lastEngine: string | null;
-  engineChoice: VoiceEngine;
-  onEngineChoiceChange: (engine: VoiceEngine) => void;
   pending: VoicePending | null;
-  onToggleVoice: () => void;
+  onToggleRecording: () => void;
   onReset: () => void;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   const phaseLabel: Record<VoicePhase, string> = {
     idle: "待機中",
-    recording: "● 録音中",
+    recording: "🎧 聞いています",
     processing: "解析中...",
     confirm: "確認待ち",
     success: "✓ 実行完了",
+    ignored: "－ 対象外の発話",
     error: "✕ エラー",
   };
   const phaseClass: Record<VoicePhase, string> = {
     idle: "bg-zinc-100 text-zinc-700",
-    recording: "bg-red-100 text-red-700 animate-pulse",
+    recording: "bg-teal-100 text-teal-700",
     processing: "bg-amber-100 text-amber-700",
     confirm: "bg-blue-100 text-blue-700",
     success: "bg-emerald-100 text-emerald-700",
+    ignored: "bg-zinc-100 text-zinc-500",
     error: "bg-red-100 text-red-700",
   };
   return (
     <div className="flex flex-col gap-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        {btSupported ? (
+        <label className="flex items-center gap-2 text-zinc-700">
+          <span>🎤 録音</span>
           <button
             type="button"
-            onClick={btEnabled ? onBtDisable : onBtEnable}
-            className={`rounded px-3 py-1 font-medium ${
-              btEnabled
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+            role="switch"
+            aria-checked={isListening}
+            aria-label="録音"
+            onClick={onToggleRecording}
+            disabled={!speechSupported}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+              isListening ? "bg-blue-600" : "bg-zinc-300"
             }`}
           >
-            {btEnabled ? "BT 連携: ON" : "BT 連携を有効化"}
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                isListening ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={onToggleVoice}
-          disabled={!speechSupported}
-          className={`rounded px-3 py-1 font-medium ${
-            isListening
-              ? "bg-red-600 text-white hover:bg-red-700"
-              : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
-          }`}
-        >
-          {isListening ? "■ 録音停止" : "🎤 音声入力 開始"}
-        </button>
+        </label>
         <button
           type="button"
           onClick={onReset}
@@ -525,44 +552,26 @@ function VoiceCommandBar({
         >
           ↺ リセット
         </button>
-        <span className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]}`}>
-          {phaseLabel[phase]}
+        <span
+          className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]} ${
+            isSpeaking ? "animate-pulse" : ""
+          }`}
+        >
+          {isSpeaking && phase === "recording" ? "🗣 発話検出中..." : phaseLabel[phase]}
         </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-          解釈
-          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
-            {(["jev", "llama"] as const).map((eng) => (
-              <button
-                key={eng}
-                type="button"
-                onClick={() => onEngineChoiceChange(eng)}
-                aria-pressed={engineChoice === eng}
-                className={`px-2 py-1 text-[11px] font-medium ${
-                  engineChoice === eng
-                    ? "bg-violet-600 text-white"
-                    : "bg-white text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                {eng === "jev" ? "Jev" : "llama"}
-              </button>
-            ))}
-          </div>
-        </label>
-        {lastEngine ? (
+        {confidence != null ? (
           <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
-            前回: {lastEngine === "jev" ? "Jev" : "llama"}
-            {confidence != null ? ` ${Math.round(confidence * 100)}%` : ""}
+            前回の確信度: {Math.round(confidence * 100)}%
           </span>
         ) : null}
       </div>
       <p className="text-[11px] leading-snug text-zinc-500">
-        {btEnabled
+        {isListening
           ? phase === "confirm"
             ? "BT: シングル→実行, ダブル→取消。"
             : "BT: シングル→録音 ON/OFF, ダブル→リセット。"
           : ""}
+        「録音」を押すとBT連携も有効化し、マイクを常時オンのまま発話の切れ目を自動検出して順に処理します。
         発話例: 「フランスパンを成形へ」「角食パンを次へ」
       </p>
 
@@ -585,13 +594,13 @@ function VoiceCommandBar({
         </div>
       ) : null}
 
-      {isListening || interim || finalText ? (
+      {isListening ? (
         <div className="rounded border border-zinc-200 bg-white px-2 py-1">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-400">認識テキスト</span>
+          <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+            {isSpeaking ? "発話を検出中..." : "直近の認識テキスト"}
+          </span>
           <p className="font-mono text-sm text-zinc-900">
-            {finalText}
-            <span className="text-zinc-400">{interim}</span>
-            {isListening && !finalText && !interim ? <span className="text-zinc-400">話してください...</span> : null}
+            {lastText || <span className="text-zinc-400">話しかけてください...</span>}
           </p>
         </div>
       ) : null}
@@ -619,7 +628,9 @@ function VoiceCommandBar({
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
               : phase === "error"
                 ? "border-red-200 bg-red-50 text-red-800"
-                : "border-zinc-200 bg-white text-zinc-700"
+                : phase === "ignored"
+                  ? "border-zinc-200 bg-zinc-50 text-zinc-500"
+                  : "border-zinc-200 bg-white text-zinc-700"
           }`}
         >
           {message}
@@ -628,7 +639,7 @@ function VoiceCommandBar({
 
       {!speechSupported ? (
         <span className="text-[11px] text-red-700">
-          このブラウザは Web Speech API に未対応です（Chrome / Safari を推奨）
+          このブラウザはマイク録音（getUserMedia / MediaRecorder）に未対応です（Chrome / Safari を推奨）
         </span>
       ) : null}
       {speechError ? <span className="text-[11px] text-red-700">{speechError}</span> : null}

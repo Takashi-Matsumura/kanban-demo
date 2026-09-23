@@ -50,7 +50,7 @@ function targetCriteria(columns: ColumnCtx[]): Record<string, string> {
 
 /**
  * Jev の state には無関係な情報が多いと精度が落ちるため（model-jaggedness/jev-1.13）、
- * 発話と工程順のみを渡す。業務ドキュメント（docs/voice/*）はここでは使わない。
+ * 発話と工程順のみを渡す。
  */
 export async function interpretWithJev(
   transcript: string,
@@ -78,7 +78,13 @@ export async function interpretWithJev(
   const confidence = Math.min(intent.confidence, card.confidence, target.confidence);
 
   if (intent.choice !== "move") {
-    return { ok: false, error: "操作の指示として解釈できませんでした", confidence: intent.confidence, debug: { intent, card, target } };
+    return {
+      ok: false,
+      error: "操作の指示として解釈できませんでした",
+      confidence: intent.confidence,
+      notACommand: true,
+      debug: { intent, card, target },
+    };
   }
 
   const targetCard = cards.find((c) => c.id === card.choice);

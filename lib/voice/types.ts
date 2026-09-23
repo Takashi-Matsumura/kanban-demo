@@ -25,5 +25,7 @@ export type VoiceEngineResult =
       ok: false;
       error: string;
       confidence: number | null;
+      /** true: バッチ移動の指示ではない発話（常時録音中の雑音・雑談など）。UIでエラー扱いしないための区別 */
+      notACommand?: boolean;
       debug?: Record<string, unknown>;
     };
