@@ -16,7 +16,6 @@ import { useSpeechSynthesis } from "mic-test/tts";
 import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
-import { useSpeechRecognition } from "./useSpeechRecognition";
 import { useWhisperRecognition } from "./useWhisperRecognition";
 import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
@@ -36,19 +35,17 @@ type VoicePending = {
 };
 
 type VoiceEngine = "jev" | "llama";
-type TranscribeEngine = "webspeech" | "whisper";
 
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
   equipments: BoardEquipment[];
   defaultVoiceEngine: VoiceEngine;
-  defaultTranscribeEngine: TranscribeEngine;
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products, equipments, defaultVoiceEngine, defaultTranscribeEngine }: Props) {
+export function Board({ initial, products, equipments, defaultVoiceEngine }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -155,8 +152,6 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
   // 音声操作デモパネルで選べるエンジン。既定値はサーバの VOICE_ENGINE 環境変数から。
   const [voiceEngineChoice, setVoiceEngineChoice] = useState<VoiceEngine>(defaultVoiceEngine);
   const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
-  // 文字起こしエンジン。既定値はサーバの TRANSCRIBE_ENGINE 環境変数から。
-  const [transcribeEngine, setTranscribeEngine] = useState<TranscribeEngine>(defaultTranscribeEngine);
   const voicePhaseRef = useLatestRef(voicePhase);
   const voicePendingRef = useLatestRef(voicePending);
 
@@ -245,9 +240,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
   const confirmVoiceMoveRef = useLatestRef(confirmVoiceMove);
   const cancelVoiceMoveRef = useLatestRef(cancelVoiceMove);
 
-  const webSpeech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
-  const whisperSpeech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
-  const speech = transcribeEngine === "whisper" ? whisperSpeech : webSpeech;
+  const speech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
   const speechStartRef = useLatestRef(speech.start);
   const speechStopRef = useLatestRef(speech.stop);
   const speechResetRef = useLatestRef(speech.reset);
@@ -326,8 +319,6 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
           lastEngine={voiceLastEngine}
           engineChoice={voiceEngineChoice}
           onEngineChoiceChange={setVoiceEngineChoice}
-          transcribeEngine={transcribeEngine}
-          onTranscribeEngineChange={setTranscribeEngine}
           pending={voicePending}
           onToggleVoice={toggleVoice}
           onReset={resetVoice}
@@ -454,8 +445,6 @@ function VoiceCommandBar({
   lastEngine,
   engineChoice,
   onEngineChoiceChange,
-  transcribeEngine,
-  onTranscribeEngineChange,
   pending,
   onToggleVoice,
   onReset,
@@ -479,8 +468,6 @@ function VoiceCommandBar({
   lastEngine: string | null;
   engineChoice: VoiceEngine;
   onEngineChoiceChange: (engine: VoiceEngine) => void;
-  transcribeEngine: TranscribeEngine;
-  onTranscribeEngineChange: (engine: TranscribeEngine) => void;
   pending: VoicePending | null;
   onToggleVoice: () => void;
   onReset: () => void;
@@ -543,26 +530,6 @@ function VoiceCommandBar({
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-          文字起こし
-          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
-            {(["webspeech", "whisper"] as const).map((eng) => (
-              <button
-                key={eng}
-                type="button"
-                onClick={() => onTranscribeEngineChange(eng)}
-                aria-pressed={transcribeEngine === eng}
-                className={`px-2 py-1 text-[11px] font-medium ${
-                  transcribeEngine === eng
-                    ? "bg-teal-600 text-white"
-                    : "bg-white text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                {eng === "webspeech" ? "Web Speech" : "Whisper"}
-              </button>
-            ))}
-          </div>
-        </label>
         <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
           解釈
           <div className="flex items-center overflow-hidden rounded border border-zinc-300">
