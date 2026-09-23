@@ -17,6 +17,7 @@ import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
 import { useSpeechRecognition } from "./useSpeechRecognition";
+import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard, voiceMoveCard } from "../actions";
 
@@ -135,18 +136,15 @@ export function Board({ initial, products, equipments }: Props) {
   const openCard = openCardId ? allCards.find((c) => c.id === openCardId) : null;
 
   // 最新の columns を参照するために ref に保持
-  const columnsRef = useRef(columns);
-  columnsRef.current = columns;
+  const columnsRef = useLatestRef(columns);
 
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const [voiceNormalization, setVoiceNormalization] = useState<VoiceNormalization | null>(null);
 
   const tts = useSpeechSynthesis({ lang: "ja-JP" });
-  const ttsSpeakRef = useRef(tts.speak);
-  ttsSpeakRef.current = tts.speak;
-  const ttsSupportedRef = useRef(tts.isSupported);
-  ttsSupportedRef.current = tts.isSupported;
+  const ttsSpeakRef = useLatestRef(tts.speak);
+  const ttsSupportedRef = useLatestRef(tts.isSupported);
 
   const handleTranscript = useCallback(async (text: string) => {
     setVoicePhase("processing");
@@ -197,24 +195,17 @@ export function Board({ initial, products, equipments }: Props) {
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
     }
-  }, []);
+  }, [columnsRef, ttsSpeakRef, ttsSupportedRef]);
 
   const speech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
-  const speechStartRef = useRef(speech.start);
-  speechStartRef.current = speech.start;
-  const speechStopRef = useRef(speech.stop);
-  speechStopRef.current = speech.stop;
-  const speechResetRef = useRef(speech.reset);
-  speechResetRef.current = speech.reset;
-  const isListeningRef = useRef(speech.isListening);
-  isListeningRef.current = speech.isListening;
+  const speechStartRef = useLatestRef(speech.start);
+  const speechStopRef = useLatestRef(speech.stop);
+  const speechResetRef = useLatestRef(speech.reset);
+  const isListeningRef = useLatestRef(speech.isListening);
 
   // 音声操作デモは既定で閉じておき、本来の工程詳細（カンバン）を主役にする。
   // BT リモートや録音開始で呼び出された時だけ自動展開し、フィードバックを見せる。
   const [voiceDemoOpen, setVoiceDemoOpen] = useState(false);
-  useEffect(() => {
-    if (speech.isListening) setVoiceDemoOpen(true);
-  }, [speech.isListening]);
 
   const toggleVoice = useCallback(() => {
     if (isListeningRef.current) {
@@ -223,9 +214,10 @@ export function Board({ initial, products, equipments }: Props) {
       setVoicePhase("recording");
       setVoiceMessage(null);
       setVoiceNormalization(null);
+      setVoiceDemoOpen(true);
       speechStartRef.current();
     }
-  }, []);
+  }, [isListeningRef, speechStartRef, speechStopRef]);
 
   const resetVoice = useCallback(() => {
     if (isListeningRef.current) speechStopRef.current();
@@ -233,7 +225,7 @@ export function Board({ initial, products, equipments }: Props) {
     setVoicePhase("idle");
     setVoiceMessage(null);
     setVoiceNormalization(null);
-  }, []);
+  }, [isListeningRef, speechResetRef, speechStopRef]);
 
   const openfit = useOpenFit({
     metadata: { title: "製パンライン カンバン" },

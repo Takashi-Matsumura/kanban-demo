@@ -179,9 +179,14 @@ function DwellChip({
 
   useEffect(() => {
     if (dragging) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 30 * 1000);
-    return () => clearInterval(t);
+    const tick = () => setNow(Date.now());
+    const t = setInterval(tick, 30 * 1000);
+    // 初回表示はタイマーの通知コールバックとして非同期に反映する（effect本体で直接 setState しない）
+    const id = setTimeout(tick, 0);
+    return () => {
+      clearInterval(t);
+      clearTimeout(id);
+    };
   }, [dragging]);
 
   if (now === null) return null;
