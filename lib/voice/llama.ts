@@ -125,7 +125,7 @@ export async function interpretWithLlama(
   const llm = await callLLM(transcript, columns);
 
   if (llm.action !== "move") {
-    return { ok: false, error: "操作が解釈できません", confidence: null, debug: { llm } };
+    return { ok: false, error: "操作が解釈できません", confidence: null, notACommand: true, debug: { llm } };
   }
 
   const scored = cards

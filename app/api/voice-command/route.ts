@@ -84,7 +84,15 @@ export async function POST(req: Request) {
   }
 
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: result.error, confidence: result.confidence, ...meta });
+    return NextResponse.json({
+      ok: false,
+      error: result.error,
+      confidence: result.confidence,
+      // true: 操作指示ではない発話 / 確信度が低く操作対象と断定できない発話。
+      // 常時録音中はどちらも「聞き流してよい」扱いとし、UIでエラー扱いしない。
+      ignored: result.notACommand === true,
+      ...meta,
+    });
   }
 
   if (result.confidence != null && result.confidence < CONFIRM_THRESHOLD) {
@@ -92,6 +100,7 @@ export async function POST(req: Request) {
       ok: false,
       error: `指示の確信度が低いため実行しませんでした（確信度 ${Math.round(result.confidence * 100)}%）`,
       confidence: result.confidence,
+      ignored: true,
       ...meta,
     });
   }

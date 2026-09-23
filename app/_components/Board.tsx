@@ -21,7 +21,7 @@ import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard, voiceMoveCard } from "../actions";
 
-type VoicePhase = "idle" | "recording" | "processing" | "confirm" | "success" | "error";
+type VoicePhase = "idle" | "recording" | "processing" | "confirm" | "success" | "ignored" | "error";
 
 type VoiceNormalization = {
   raw: string;
@@ -155,11 +155,34 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   const voicePhaseRef = useLatestRef(voicePhase);
   const voicePendingRef = useLatestRef(voicePending);
 
+  // 発話ごとの処理が終わったあと、しばらくしたら自動的に「聞いています」状態へ戻す。
+  // 常時録音中は毎回ボタンを押し直させないため。idle（セッション停止）や
+  // confirm（確認待ち）のときは上書きしない。
+  const returnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReturnToListening = useCallback(
+    (delayMs: number) => {
+      if (returnTimerRef.current) clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = setTimeout(() => {
+        returnTimerRef.current = null;
+        if (voicePhaseRef.current === "idle" || voicePhaseRef.current === "confirm") return;
+        setVoicePhase("recording");
+        setVoiceMessage(null);
+      }, delayMs);
+    },
+    [voicePhaseRef],
+  );
+
   const tts = useSpeechSynthesis({ lang: "ja-JP" });
   const ttsSpeakRef = useLatestRef(tts.speak);
   const ttsSupportedRef = useLatestRef(tts.isSupported);
 
   const handleTranscript = useCallback(async (text: string) => {
+    // 処理中・確認待ちの間に検出された発話は無視する（多重実行防止）。
+    if (voicePhaseRef.current === "processing" || voicePhaseRef.current === "confirm") return;
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
     setVoicePhase("processing");
     setVoiceMessage(null);
     setVoiceNormalization(null);
@@ -182,10 +205,19 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       setVoiceConfidence(typeof data.confidence === "number" ? data.confidence : null);
       setVoiceLastEngine(typeof data.engine === "string" ? data.engine : null);
       if (!data.ok) {
+        if (data.ignored) {
+          // 常時録音中に拾った、操作指示ではない発話（雑談・雑音等）。
+          // エラー扱いにはせず、読み上げもせずに静かに聞き取りへ戻る。
+          setVoicePhase("ignored");
+          setVoiceMessage(`操作指示として認識しませんでした: 「${text}」`);
+          scheduleReturnToListening(1200);
+          return;
+        }
         setVoicePhase("error");
         const msg = data.error ?? "指示を解釈できませんでした";
         setVoiceMessage(msg);
         if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+        scheduleReturnToListening(4000);
         return;
       }
       if (data.needsConfirm) {
@@ -201,13 +233,15 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       setVoicePhase("success");
       setVoiceMessage(data.message);
       if (ttsSupportedRef.current) ttsSpeakRef.current(data.message);
+      scheduleReturnToListening(2500);
     } catch (e) {
       setVoicePhase("error");
       const msg = `通信エラー: ${(e as Error).message}`;
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+      scheduleReturnToListening(4000);
     }
-  }, [voiceEngineChoiceRef, ttsSpeakRef, ttsSupportedRef]);
+  }, [voiceEngineChoiceRef, ttsSpeakRef, ttsSupportedRef, voicePhaseRef, scheduleReturnToListening]);
 
   const confirmVoiceMove = useCallback(async () => {
     const pending = voicePendingRef.current;
@@ -219,28 +253,31 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       const msg = "実行しました";
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+      scheduleReturnToListening(2500);
     } catch (e) {
       setVoicePhase("error");
       const msg = `実行エラー: ${(e as Error).message}`;
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+      scheduleReturnToListening(4000);
     } finally {
       setVoicePending(null);
     }
-  }, [voicePendingRef, ttsSpeakRef, ttsSupportedRef]);
+  }, [voicePendingRef, ttsSpeakRef, ttsSupportedRef, scheduleReturnToListening]);
 
   const cancelVoiceMove = useCallback(() => {
     setVoicePending(null);
-    setVoicePhase("idle");
+    setVoicePhase("recording");
     const msg = "取消しました";
     setVoiceMessage(msg);
     if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
-  }, [ttsSpeakRef, ttsSupportedRef]);
+    scheduleReturnToListening(1500);
+  }, [ttsSpeakRef, ttsSupportedRef, scheduleReturnToListening]);
 
   const confirmVoiceMoveRef = useLatestRef(confirmVoiceMove);
   const cancelVoiceMoveRef = useLatestRef(cancelVoiceMove);
 
-  const speech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
+  const speech = useWhisperRecognition({ lang: "ja", onUtterance: handleTranscript });
   const speechStartRef = useLatestRef(speech.start);
   const speechStopRef = useLatestRef(speech.stop);
   const speechResetRef = useLatestRef(speech.reset);
@@ -251,8 +288,14 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   const [voiceDemoOpen, setVoiceDemoOpen] = useState(false);
 
   const toggleVoice = useCallback(() => {
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
     if (isListeningRef.current) {
       speechStopRef.current();
+      setVoicePhase("idle");
+      setVoiceMessage(null);
     } else {
       setVoicePhase("recording");
       setVoiceMessage(null);
@@ -263,8 +306,13 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   }, [isListeningRef, speechStartRef, speechStopRef]);
 
   const resetVoice = useCallback(() => {
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
     if (isListeningRef.current) speechStopRef.current();
     speechResetRef.current();
+    setVoicePending(null);
     setVoicePhase("idle");
     setVoiceMessage(null);
     setVoiceNormalization(null);
@@ -309,8 +357,8 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
           btError={openfit.error}
           speechSupported={speech.isSupported}
           isListening={speech.isListening}
-          interim={speech.interim}
-          finalText={speech.finalText}
+          isSpeaking={speech.isSpeaking}
+          lastText={speech.lastText}
           speechError={speech.error}
           phase={voicePhase}
           message={voiceMessage}
@@ -435,8 +483,8 @@ function VoiceCommandBar({
   btError,
   speechSupported,
   isListening,
-  interim,
-  finalText,
+  isSpeaking,
+  lastText,
   speechError,
   phase,
   message,
@@ -458,8 +506,8 @@ function VoiceCommandBar({
   btError: Error | null;
   speechSupported: boolean;
   isListening: boolean;
-  interim: string;
-  finalText: string;
+  isSpeaking: boolean;
+  lastText: string;
   speechError: string | null;
   phase: VoicePhase;
   message: string | null;
@@ -476,18 +524,20 @@ function VoiceCommandBar({
 }) {
   const phaseLabel: Record<VoicePhase, string> = {
     idle: "待機中",
-    recording: "● 録音中",
+    recording: "🎧 聞いています",
     processing: "解析中...",
     confirm: "確認待ち",
     success: "✓ 実行完了",
+    ignored: "－ 対象外の発話",
     error: "✕ エラー",
   };
   const phaseClass: Record<VoicePhase, string> = {
     idle: "bg-zinc-100 text-zinc-700",
-    recording: "bg-red-100 text-red-700 animate-pulse",
+    recording: "bg-teal-100 text-teal-700",
     processing: "bg-amber-100 text-amber-700",
     confirm: "bg-blue-100 text-blue-700",
     success: "bg-emerald-100 text-emerald-700",
+    ignored: "bg-zinc-100 text-zinc-500",
     error: "bg-red-100 text-red-700",
   };
   return (
@@ -516,7 +566,7 @@ function VoiceCommandBar({
               : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
           }`}
         >
-          {isListening ? "■ 録音停止" : "🎤 音声入力 開始"}
+          {isListening ? "■ 常時音声操作 停止" : "🎤 常時音声操作 開始"}
         </button>
         <button
           type="button"
@@ -525,8 +575,12 @@ function VoiceCommandBar({
         >
           ↺ リセット
         </button>
-        <span className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]}`}>
-          {phaseLabel[phase]}
+        <span
+          className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]} ${
+            isSpeaking ? "animate-pulse" : ""
+          }`}
+        >
+          {isSpeaking && phase === "recording" ? "🗣 発話検出中..." : phaseLabel[phase]}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-3">
@@ -561,8 +615,9 @@ function VoiceCommandBar({
         {btEnabled
           ? phase === "confirm"
             ? "BT: シングル→実行, ダブル→取消。"
-            : "BT: シングル→録音 ON/OFF, ダブル→リセット。"
+            : "BT: シングル→常時音声操作 ON/OFF, ダブル→リセット。"
           : ""}
+        マイクは常時オンのまま、発話の切れ目を自動検出して順に処理します。
         発話例: 「フランスパンを成形へ」「角食パンを次へ」
       </p>
 
@@ -585,13 +640,13 @@ function VoiceCommandBar({
         </div>
       ) : null}
 
-      {isListening || interim || finalText ? (
+      {isListening ? (
         <div className="rounded border border-zinc-200 bg-white px-2 py-1">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-400">認識テキスト</span>
+          <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+            {isSpeaking ? "発話を検出中..." : "直近の認識テキスト"}
+          </span>
           <p className="font-mono text-sm text-zinc-900">
-            {finalText}
-            <span className="text-zinc-400">{interim}</span>
-            {isListening && !finalText && !interim ? <span className="text-zinc-400">話してください...</span> : null}
+            {lastText || <span className="text-zinc-400">話しかけてください...</span>}
           </p>
         </div>
       ) : null}
@@ -619,7 +674,9 @@ function VoiceCommandBar({
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
               : phase === "error"
                 ? "border-red-200 bg-red-50 text-red-800"
-                : "border-zinc-200 bg-white text-zinc-700"
+                : phase === "ignored"
+                  ? "border-zinc-200 bg-zinc-50 text-zinc-500"
+                  : "border-zinc-200 bg-white text-zinc-700"
           }`}
         >
           {message}
@@ -628,7 +685,7 @@ function VoiceCommandBar({
 
       {!speechSupported ? (
         <span className="text-[11px] text-red-700">
-          このブラウザは Web Speech API に未対応です（Chrome / Safari を推奨）
+          このブラウザはマイク録音（getUserMedia / MediaRecorder）に未対応です（Chrome / Safari を推奨）
         </span>
       ) : null}
       {speechError ? <span className="text-[11px] text-red-700">{speechError}</span> : null}

@@ -78,7 +78,13 @@ export async function interpretWithJev(
   const confidence = Math.min(intent.confidence, card.confidence, target.confidence);
 
   if (intent.choice !== "move") {
-    return { ok: false, error: "操作の指示として解釈できませんでした", confidence: intent.confidence, debug: { intent, card, target } };
+    return {
+      ok: false,
+      error: "操作の指示として解釈できませんでした",
+      confidence: intent.confidence,
+      notACommand: true,
+      debug: { intent, card, target },
+    };
   }
 
   const targetCard = cards.find((c) => c.id === card.choice);

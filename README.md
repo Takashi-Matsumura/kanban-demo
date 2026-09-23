@@ -5,7 +5,7 @@
 - **11工程固定**: 仕込 → 一次発酵 → 分割・丸め → ベンチタイム → 成形 → 二次発酵 → 焼成 → 冷却 → 包装 → 検品 → 出荷
 - バッチ（製造ロット）の追加・編集・工程間移動（ドラッグ&ドロップ）
 - 工程ごとの標準時間・滞留時間・標準超過アラート表示
-- 音声コマンドでバッチを次工程へ移動。文字起こしは Whisper（要 whisper-server）、解釈は TypeSafe AI「Jev」/ ローカルLLM を切替可能
+- 音声コマンドでバッチを次工程へ移動。マイクは常時オンのまま発話区間を自動検出（VAD）し、操作指示ではない発話は自動的に聞き流す。解釈は TypeSafe AI「Jev」/ ローカルLLM を切替可能
 - Bluetoothイヤホンの物理ボタンで録音開始/停止・リセット（Shokz OpenFit 2+ で動作確認）
 - ダッシュボード（本日のKPI・要注意バッチ・製品別/アレルゲン別集計）
 - 振り返りKPI（過去7日の出荷数・リードタイム・品質合格率・ボトルネック工程）
@@ -24,7 +24,7 @@
 | データ層 | Prisma 7 + SQLite (`@prisma/adapter-better-sqlite3` / `better-sqlite3`) |
 | ミューテーション | Server Actions + `updateTag('board')` |
 | ドラッグ & ドロップ | `@dnd-kit/core` / `@dnd-kit/sortable` |
-| 音声入力（文字起こし） | whisper-server（whisper.cpp、要 `--convert`。マイク録音を `MediaRecorder` で取得） |
+| 音声入力（文字起こし） | whisper-server（whisper.cpp、要 `--convert`）。マイクは常時オン、音量ベースのVADで発話区間ごとに `MediaRecorder` で録音・送信 |
 | 音声入力（解釈） | TypeSafe AI「Jev」（既定）/ ローカルLLM（llama.cpp 等、OpenAI互換API） |
 | BT連携・TTS | [`mic-test`](https://github.com/Takashi-Matsumura/mic-test)（GitHub直接依存、Media Session API経由のAVRCP制御） |
 
@@ -53,13 +53,15 @@ brew install whisper-cpp ffmpeg
 whisper-server -m /path/to/ggml-large-v3-turbo-q5_0.bin --host 127.0.0.1 --port 8090 -l ja --convert
 ```
 
-`--convert`（ffmpeg 変換）は、ブラウザの `MediaRecorder` が出力する webm/opus 形式を受け付けるために必須です。マイク音声はまとめて録音し、録音停止後にサーバへ送って文字起こしします（逐次の途中結果表示はありません）。
+`--convert`（ffmpeg 変換）は、ブラウザの `MediaRecorder` が出力する webm/opus 形式を受け付けるために必須です。
 
 ```bash
 WHISPER_URL=http://localhost:8090 # 既定値。whisper-server のエンドポイント
 ```
 
 ブラウザ→`/api/transcribe`（Next.js）→`whisper-server` の順に中継し、CORS を回避している。
+
+**常時録音・自動発話区間検出（VAD）**: 「常時音声操作 開始」を押すとマイクを開いたままにし、`app/_components/useWhisperRecognition.ts` が音量（RMS）ベースの簡易VADで発話の開始・終了を自動検出する。無音が一定時間（既定 900ms）続いたところで発話区間を確定し、その区間だけを `whisper-server` に送って文字起こし・解釈する。逐次の途中結果表示はなく、区間ごとにまとめて結果が届く。ボタン操作は不要になるが、しきい値（`RMS_THRESHOLD` = 0.02）は環境音レベルによって調整が必要になる場合がある。操作指示ではないと判定された発話（雑談・雑音等）は静かに聞き流し、次の発話を待つ。
 
 #### 解釈エンジン
 
@@ -125,11 +127,11 @@ LLAMA_MODEL=gemma-4-e4b-it-Q4_K_M.gguf   # 既定値。使用モデル名
 
 ## 音声入力・BT連携の仕組み
 
-1. `useWhisperRecognition` が `getUserMedia` + `MediaRecorder` でマイク音声を録音し、停止時に `/api/transcribe` へ送信。同ルートが `whisper-server` の `/inference` へ中継して文字起こしする（逐次の途中結果表示はなし）
+1. `useWhisperRecognition` が `getUserMedia` でマイクを常時開いたまま、音量ベースのVADで発話区間を自動検出。発話ごとに `MediaRecorder` で区間を録音し、無音がしばらく続いたら確定して `/api/transcribe` へ送信。同ルートが `whisper-server` の `/inference` へ中継して文字起こしする（逐次の途中結果表示はなし。区間ごとにまとめて結果が届く）
 2. `lib/voice-dictionary.ts` で製パン用語の同音異義語誤変換を補正（例: 「整形」→「成形」）
-3. `app/api/voice-command/route.ts` が Jev（既定）またはローカルLLMへ問い合わせ、対象バッチと移動先工程を解決
-4. Jev の確信度が高ければそのまま、中程度なら画面確認を経て `moveCard`（Server Action）を実行
-5. `mic-test/openfit` の `useOpenFit` がBluetoothイヤホンの物理ボタン（シングルクリック=録音開始/停止 or 確認時は実行、ダブルクリック=リセット or 確認時は取消）をAVRCP経由で購読し、`mic-test/tts` が結果を読み上げ
+3. `app/api/voice-command/route.ts` が Jev（既定）またはローカルLLMへ問い合わせ、対象バッチと移動先工程を解決。操作指示ではないと判定された発話（常時録音中に拾う雑談・雑音等）は静かに聞き流し、次の発話区間の検出を続ける
+4. Jev の確信度が高ければそのまま、中程度なら画面確認を経て `moveCard`（Server Action）を実行。処理が終わるとしばらくして自動的に聞き取り状態へ戻る
+5. `mic-test/openfit` の `useOpenFit` がBluetoothイヤホンの物理ボタン（シングルクリック=常時音声操作 ON/OFF or 確認時は実行、ダブルクリック=リセット or 確認時は取消）をAVRCP経由で購読し、`mic-test/tts` が結果を読み上げ
 
 ## ディレクトリ構成
 
