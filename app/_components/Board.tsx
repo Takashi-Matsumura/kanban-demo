@@ -525,19 +525,26 @@ function VoiceCommandBar({
   return (
     <div className="flex flex-col gap-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onToggleRecording}
-          disabled={!speechSupported}
-          aria-pressed={isListening}
-          className={`rounded px-3 py-1 font-medium transition ${
-            isListening
-              ? "bg-blue-600 text-white hover:bg-blue-700"
-              : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
-          }`}
-        >
-          {isListening ? "🎙 録音: ON" : "🎤 録音を開始"}
-        </button>
+        <label className="flex items-center gap-2 text-zinc-700">
+          <span>🎤 録音</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isListening}
+            aria-label="録音"
+            onClick={onToggleRecording}
+            disabled={!speechSupported}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+              isListening ? "bg-blue-600" : "bg-zinc-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                isListening ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </label>
         <button
           type="button"
           onClick={onReset}
