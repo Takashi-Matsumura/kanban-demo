@@ -5,7 +5,7 @@
 - **11工程固定**: 仕込 → 一次発酵 → 分割・丸め → ベンチタイム → 成形 → 二次発酵 → 焼成 → 冷却 → 包装 → 検品 → 出荷
 - バッチ（製造ロット）の追加・編集・工程間移動（ドラッグ&ドロップ）
 - 工程ごとの標準時間・滞留時間・標準超過アラート表示
-- 音声コマンドでバッチを次工程へ移動（ローカルLLM連携）
+- 音声コマンドでバッチを次工程へ移動（TypeSafe AI「Jev」、ローカルLLMへの切替も可能）
 - Bluetoothイヤホンの物理ボタンで録音開始/停止・リセット（Shokz OpenFit 2+ で動作確認）
 - ダッシュボード（本日のKPI・要注意バッチ・製品別/アレルゲン別集計）
 - 振り返りKPI（過去7日の出荷数・リードタイム・品質合格率・ボトルネック工程）
@@ -24,7 +24,7 @@
 | データ層 | Prisma 7 + SQLite (`@prisma/adapter-better-sqlite3` / `better-sqlite3`) |
 | ミューテーション | Server Actions + `updateTag('board')` |
 | ドラッグ & ドロップ | `@dnd-kit/core` / `@dnd-kit/sortable` |
-| 音声入力 | Web Speech API（Chrome/Safari） + ローカルLLM（llama.cpp 等、OpenAI互換API） |
+| 音声入力 | Web Speech API（Chrome/Safari） + TypeSafe AI「Jev」（既定）/ ローカルLLM（llama.cpp 等、OpenAI互換API） |
 | BT連携・TTS | [`mic-test`](https://github.com/Takashi-Matsumura/mic-test)（GitHub直接依存、Media Session API経由のAVRCP制御） |
 
 ## セットアップ
@@ -40,7 +40,22 @@ npm run dev              # 開発サーバを起動
 
 ### 音声入力を使う場合（任意）
 
-音声コマンド機能はローカルLLMサーバ（llama.cpp の `llama-server` など、OpenAI互換 `/v1/chat/completions` を提供するもの）が別途 `http://localhost:8080` で起動している前提です。未起動の場合、音声コマンドはエラーになります（カンバン本体の操作には影響しません）。
+音声コマンドは既定で [TypeSafe AI](https://typesafe.ai) の Jev を使って解釈します。`.env.local` に API キーを設定してください。
+
+```bash
+VOICE_ENGINE=jev                # 既定値。jev | llama で切替
+TYPESAFE_API_KEY=your-api-key   # https://typesafe.ai で発行したキー
+```
+
+Jev の確信度に応じて挙動が変わります。
+
+| 確信度 | 挙動 |
+| --- | --- |
+| 85% 以上 | 自動実行 |
+| 60〜85% | 確認してから実行（画面の[実行]/[取消]、または BT イヤホンのシングル/ダブルクリック） |
+| 60% 未満 | 実行せず「聞き取れませんでした」と表示 |
+
+従来のローカルLLM経路（llama.cpp の `llama-server` など、OpenAI互換 `/v1/chat/completions` を提供するもの）に戻す場合は `VOICE_ENGINE=llama` を設定し、別途 `http://localhost:8080` でサーバを起動してください。この経路には確信度がないため、解釈できれば常に確認なしで即実行します。
 
 ```bash
 LLAMA_URL=http://localhost:8080          # 既定値。LLMサーバのエンドポイント

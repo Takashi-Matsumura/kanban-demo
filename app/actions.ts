@@ -244,6 +244,13 @@ export async function moveCard(args: {
 }
 
 export async function voiceMoveCard(cardId: string, toColumnId: string) {
+  const [card, column] = await Promise.all([
+    prisma.card.findUnique({ where: { id: cardId }, select: { id: true } }),
+    prisma.column.findUnique({ where: { id: toColumnId }, select: { id: true } }),
+  ]);
+  if (!card) throw new Error("バッチが見つかりません");
+  if (!column) throw new Error("移動先の工程が見つかりません");
+
   const last = await prisma.card.findFirst({
     where: { columnId: toColumnId },
     orderBy: { order: "desc" },
