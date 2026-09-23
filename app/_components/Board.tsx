@@ -17,10 +17,12 @@ import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
 import { useSpeechRecognition } from "./useSpeechRecognition";
+import { useWhisperRecognition } from "./useWhisperRecognition";
+import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard, voiceMoveCard } from "../actions";
 
-type VoicePhase = "idle" | "recording" | "processing" | "success" | "error";
+type VoicePhase = "idle" | "recording" | "processing" | "confirm" | "success" | "error";
 
 type VoiceNormalization = {
   raw: string;
@@ -28,15 +30,25 @@ type VoiceNormalization = {
   replacements: { from: string; to: string }[];
 };
 
+type VoicePending = {
+  cardId: string;
+  toColumnId: string;
+};
+
+type VoiceEngine = "jev" | "llama";
+type TranscribeEngine = "webspeech" | "whisper";
+
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
   equipments: BoardEquipment[];
+  defaultVoiceEngine: VoiceEngine;
+  defaultTranscribeEngine: TranscribeEngine;
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products, equipments }: Props) {
+export function Board({ initial, products, equipments, defaultVoiceEngine, defaultTranscribeEngine }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -134,13 +146,21 @@ export function Board({ initial, products, equipments }: Props) {
   // openCardId 自体は残るが副作用なし（cuid なので衝突しない）。
   const openCard = openCardId ? allCards.find((c) => c.id === openCardId) : null;
 
-  // 最新の columns を参照するために ref に保持
-  const columnsRef = useRef(columns);
-  columnsRef.current = columns;
-
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const [voiceNormalization, setVoiceNormalization] = useState<VoiceNormalization | null>(null);
+  const [voicePending, setVoicePending] = useState<VoicePending | null>(null);
+  const [voiceConfidence, setVoiceConfidence] = useState<number | null>(null);
+  const [voiceLastEngine, setVoiceLastEngine] = useState<string | null>(null);
+  // 音声操作デモパネルで選べるエンジン。既定値はサーバの VOICE_ENGINE 環境変数から。
+  const [voiceEngineChoice, setVoiceEngineChoice] = useState<VoiceEngine>(defaultVoiceEngine);
+  const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
+  // 文字起こしエンジン。既定値はサーバの TRANSCRIBE_ENGINE 環境変数から。
+  const [transcribeEngine, setTranscribeEngine] = useState<TranscribeEngine>(defaultTranscribeEngine);
+  const voicePhaseRef = useRef<VoicePhase>(voicePhase);
+  voicePhaseRef.current = voicePhase;
+  const voicePendingRef = useRef<VoicePending | null>(voicePending);
+  voicePendingRef.current = voicePending;
 
   const tts = useSpeechSynthesis({ lang: "ja-JP" });
   const ttsSpeakRef = useRef(tts.speak);
@@ -152,25 +172,13 @@ export function Board({ initial, products, equipments }: Props) {
     setVoicePhase("processing");
     setVoiceMessage(null);
     setVoiceNormalization(null);
-    const cols = columnsRef.current;
-    const context = {
-      columns: cols.map((c) => ({ id: c.id, name: c.name })),
-      cards: cols.flatMap((col) =>
-        col.cards.map((card) => ({
-          id: card.id,
-          productName: card.product?.name ?? card.title ?? null,
-          lotCode: card.lotCode ?? null,
-          columnId: col.id,
-          columnName: col.name,
-          assignee: card.assignee ?? null,
-        })),
-      ),
-    };
+    setVoicePending(null);
+    setVoiceConfidence(null);
     try {
       const res = await fetch("/api/voice-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: text, context }),
+        body: JSON.stringify({ transcript: text, engine: voiceEngineChoiceRef.current }),
       });
       const data = await res.json();
       if (data.rawTranscript || data.normalizedTranscript) {
@@ -180,9 +188,20 @@ export function Board({ initial, products, equipments }: Props) {
           replacements: data.replacements ?? [],
         });
       }
+      setVoiceConfidence(typeof data.confidence === "number" ? data.confidence : null);
+      setVoiceLastEngine(typeof data.engine === "string" ? data.engine : null);
       if (!data.ok) {
         setVoicePhase("error");
         const msg = data.error ?? "指示を解釈できませんでした";
+        setVoiceMessage(msg);
+        if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+        return;
+      }
+      if (data.needsConfirm) {
+        setVoicePending({ cardId: data.cardId, toColumnId: data.toColumnId });
+        setVoicePhase("confirm");
+        const confPct = typeof data.confidence === "number" ? `（確信度 ${Math.round(data.confidence * 100)}%）` : "";
+        const msg = `${data.message}${confPct} よろしいですか？`;
         setVoiceMessage(msg);
         if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
         return;
@@ -197,9 +216,44 @@ export function Board({ initial, products, equipments }: Props) {
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
     }
+  }, [voiceEngineChoiceRef]);
+
+  const confirmVoiceMove = useCallback(async () => {
+    const pending = voicePendingRef.current;
+    if (!pending) return;
+    setVoicePhase("processing");
+    try {
+      await voiceMoveCard(pending.cardId, pending.toColumnId);
+      setVoicePhase("success");
+      const msg = "実行しました";
+      setVoiceMessage(msg);
+      if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+    } catch (e) {
+      setVoicePhase("error");
+      const msg = `実行エラー: ${(e as Error).message}`;
+      setVoiceMessage(msg);
+      if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+    } finally {
+      setVoicePending(null);
+    }
   }, []);
 
-  const speech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
+  const cancelVoiceMove = useCallback(() => {
+    setVoicePending(null);
+    setVoicePhase("idle");
+    const msg = "取消しました";
+    setVoiceMessage(msg);
+    if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
+  }, []);
+
+  const confirmVoiceMoveRef = useRef(confirmVoiceMove);
+  confirmVoiceMoveRef.current = confirmVoiceMove;
+  const cancelVoiceMoveRef = useRef(cancelVoiceMove);
+  cancelVoiceMoveRef.current = cancelVoiceMove;
+
+  const webSpeech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
+  const whisperSpeech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
+  const speech = transcribeEngine === "whisper" ? whisperSpeech : webSpeech;
   const speechStartRef = useRef(speech.start);
   speechStartRef.current = speech.start;
   const speechStopRef = useRef(speech.stop);
@@ -235,10 +289,28 @@ export function Board({ initial, products, equipments }: Props) {
     setVoiceNormalization(null);
   }, []);
 
+  // 確認待ち（needsConfirm）のときは BT イヤホンのボタンを 実行/取消 に割り当てる。
+  // マウスを使わずに操作できるようにするため。
+  const handleBtPlayPause = useCallback(() => {
+    if (voicePhaseRef.current === "confirm") {
+      confirmVoiceMoveRef.current();
+    } else {
+      toggleVoice();
+    }
+  }, [toggleVoice]);
+
+  const handleBtNext = useCallback(() => {
+    if (voicePhaseRef.current === "confirm") {
+      cancelVoiceMoveRef.current();
+    } else {
+      resetVoice();
+    }
+  }, [resetVoice]);
+
   const openfit = useOpenFit({
     metadata: { title: "製パンライン カンバン" },
-    onPlayPause: toggleVoice,
-    onNext: resetVoice,
+    onPlayPause: handleBtPlayPause,
+    onNext: handleBtNext,
   });
 
   return (
@@ -262,8 +334,17 @@ export function Board({ initial, products, equipments }: Props) {
           phase={voicePhase}
           message={voiceMessage}
           normalization={voiceNormalization}
+          confidence={voiceConfidence}
+          lastEngine={voiceLastEngine}
+          engineChoice={voiceEngineChoice}
+          onEngineChoiceChange={setVoiceEngineChoice}
+          transcribeEngine={transcribeEngine}
+          onTranscribeEngineChange={setTranscribeEngine}
+          pending={voicePending}
           onToggleVoice={toggleVoice}
           onReset={resetVoice}
+          onConfirm={confirmVoiceMove}
+          onCancel={cancelVoiceMove}
         />
       </VoiceDemoWidget>
       <DndContext
@@ -381,8 +462,17 @@ function VoiceCommandBar({
   phase,
   message,
   normalization,
+  confidence,
+  lastEngine,
+  engineChoice,
+  onEngineChoiceChange,
+  transcribeEngine,
+  onTranscribeEngineChange,
+  pending,
   onToggleVoice,
   onReset,
+  onConfirm,
+  onCancel,
 }: {
   btSupported: boolean;
   btEnabled: boolean;
@@ -397,13 +487,23 @@ function VoiceCommandBar({
   phase: VoicePhase;
   message: string | null;
   normalization: VoiceNormalization | null;
+  confidence: number | null;
+  lastEngine: string | null;
+  engineChoice: VoiceEngine;
+  onEngineChoiceChange: (engine: VoiceEngine) => void;
+  transcribeEngine: TranscribeEngine;
+  onTranscribeEngineChange: (engine: TranscribeEngine) => void;
+  pending: VoicePending | null;
   onToggleVoice: () => void;
   onReset: () => void;
+  onConfirm: () => void;
+  onCancel: () => void;
 }) {
   const phaseLabel: Record<VoicePhase, string> = {
     idle: "待機中",
     recording: "● 録音中",
     processing: "解析中...",
+    confirm: "確認待ち",
     success: "✓ 実行完了",
     error: "✕ エラー",
   };
@@ -411,6 +511,7 @@ function VoiceCommandBar({
     idle: "bg-zinc-100 text-zinc-700",
     recording: "bg-red-100 text-red-700 animate-pulse",
     processing: "bg-amber-100 text-amber-700",
+    confirm: "bg-blue-100 text-blue-700",
     success: "bg-emerald-100 text-emerald-700",
     error: "bg-red-100 text-red-700",
   };
@@ -453,10 +554,81 @@ function VoiceCommandBar({
           {phaseLabel[phase]}
         </span>
       </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          文字起こし
+          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
+            {(["webspeech", "whisper"] as const).map((eng) => (
+              <button
+                key={eng}
+                type="button"
+                onClick={() => onTranscribeEngineChange(eng)}
+                aria-pressed={transcribeEngine === eng}
+                className={`px-2 py-1 text-[11px] font-medium ${
+                  transcribeEngine === eng
+                    ? "bg-teal-600 text-white"
+                    : "bg-white text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {eng === "webspeech" ? "Web Speech" : "Whisper"}
+              </button>
+            ))}
+          </div>
+        </label>
+        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          解釈
+          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
+            {(["jev", "llama"] as const).map((eng) => (
+              <button
+                key={eng}
+                type="button"
+                onClick={() => onEngineChoiceChange(eng)}
+                aria-pressed={engineChoice === eng}
+                className={`px-2 py-1 text-[11px] font-medium ${
+                  engineChoice === eng
+                    ? "bg-violet-600 text-white"
+                    : "bg-white text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {eng === "jev" ? "Jev" : "llama"}
+              </button>
+            ))}
+          </div>
+        </label>
+        {lastEngine ? (
+          <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
+            前回: {lastEngine === "jev" ? "Jev" : "llama"}
+            {confidence != null ? ` ${Math.round(confidence * 100)}%` : ""}
+          </span>
+        ) : null}
+      </div>
       <p className="text-[11px] leading-snug text-zinc-500">
-        {btEnabled ? "BT: シングル→録音 ON/OFF, ダブル→リセット。" : ""}
+        {btEnabled
+          ? phase === "confirm"
+            ? "BT: シングル→実行, ダブル→取消。"
+            : "BT: シングル→録音 ON/OFF, ダブル→リセット。"
+          : ""}
         発話例: 「フランスパンを成形へ」「角食パンを次へ」
       </p>
+
+      {phase === "confirm" && pending ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded bg-blue-600 px-3 py-1 font-medium text-white hover:bg-blue-700"
+          >
+            ✓ 実行
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-800 hover:bg-zinc-100"
+          >
+            ✕ 取消
+          </button>
+        </div>
+      ) : null}
 
       {isListening || interim || finalText ? (
         <div className="rounded border border-zinc-200 bg-white px-2 py-1">

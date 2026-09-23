@@ -1,135 +1,52 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { normalizeVoiceText } from "@/lib/voice-dictionary";
-import { loadVoiceContext } from "@/lib/voice-context";
+import { interpretWithJev } from "@/lib/voice/jev";
+import { interpretWithLlama } from "@/lib/voice/llama";
+import type { CardCtx, ColumnCtx } from "@/lib/voice/types";
 
-const LLAMA_URL = process.env.LLAMA_URL ?? "http://localhost:8080";
-const LLAMA_MODEL = process.env.LLAMA_MODEL ?? "gemma-4-e4b-it-Q4_K_M.gguf";
+type VoiceEngine = "jev" | "llama";
 
-type ColumnCtx = { id: string; name: string };
-type CardCtx = {
-  id: string;
-  productName: string | null;
-  lotCode: string | null;
-  columnId: string;
-  columnName: string;
-  assignee: string | null;
-};
+const DEFAULT_VOICE_ENGINE: VoiceEngine = process.env.VOICE_ENGINE === "llama" ? "llama" : "jev";
 
-type RequestBody = {
-  transcript: string;
-  context: {
-    columns: ColumnCtx[];
-    cards: CardCtx[];
-  };
-};
+const AUTO_THRESHOLD = 0.85;
+const CONFIRM_THRESHOLD = 0.6;
 
-type LLMOutput = {
-  action: "move" | "unknown";
-  product_hint: string | null;
-  lot_hint: string | null;
-  assignee_hint: string | null;
-  from_stage_hint: string | null;
-  to_stage: string | null;
-  direction: "next" | "prev" | null;
-};
+type RequestBody = { transcript: string; engine?: VoiceEngine };
 
-function buildSystemPrompt(columns: ColumnCtx[]): string {
-  const stageList = columns.map((c) => c.name).join("、");
-  const knowledge = loadVoiceContext();
-  const lines = [
-    "あなたは製パン工場のバッチ管理アシスタントです。",
-    `工程は順に: ${stageList}。`,
-    "ユーザーの発話を解釈し、以下のJSONを返してください。",
-    "厳守: 出力は JSON オブジェクト 1 つのみ。Markdown のコードブロック (```) は使用しない。説明文も不要。",
-    "{",
-    '  "action": "move" | "unknown",',
-    '  "product_hint": "製品名" | null,',
-    '  "lot_hint": "ロットコードや日付の手がかり" | null,',
-    '  "assignee_hint": "担当者名" | null,',
-    '  "from_stage_hint": "現在工程の手がかり" | null,',
-    '  "to_stage": "移動先の工程名" | null,',
-    '  "direction": "next" | "prev" | null',
-    "}",
-    "to_stage には必ず上の工程一覧の名前そのものを使うこと。",
-    "to_stage と direction はどちらか一方を埋めること。両方 null なら action は unknown。",
-  ];
-  if (knowledge) {
-    lines.push("", "## 業務知識（以下のドキュメントに沿って解釈すること）", "", knowledge);
-  }
-  return lines.join("\n");
-}
-
-async function callLLM(transcript: string, columns: ColumnCtx[]): Promise<LLMOutput> {
-  const res = await fetch(`${LLAMA_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: LLAMA_MODEL,
-      messages: [
-        { role: "system", content: buildSystemPrompt(columns) },
-        { role: "user", content: transcript },
-      ],
-      temperature: 0.1,
-      max_tokens: 512,
-      response_format: { type: "json_object" },
+/**
+ * columns/cards はクライアントの context ではなく、ここで DB から直接取得する。
+ * クライアント供給の ID を検証なしに信用しないため。
+ */
+async function loadVoiceState(): Promise<{ columns: ColumnCtx[]; cards: CardCtx[] }> {
+  const [columns, cards] = await Promise.all([
+    prisma.column.findMany({ orderBy: { order: "asc" }, select: { id: true, name: true } }),
+    prisma.card.findMany({
+      select: {
+        id: true,
+        title: true,
+        lotCode: true,
+        columnId: true,
+        assignee: true,
+        priority: true,
+        product: { select: { name: true } },
+        column: { select: { name: true } },
+      },
     }),
-  });
-  if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
-  const data = await res.json();
-  const content: string = data?.choices?.[0]?.message?.content ?? "{}";
-  const jsonText = extractJson(content);
-  return JSON.parse(jsonText) as LLMOutput;
-}
-
-function extractJson(s: string): string {
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start < 0 || end < 0 || end < start) return "{}";
-  return s.slice(start, end + 1);
-}
-
-function normalize(s: string | null | undefined): string {
-  if (!s) return "";
-  return s.toLowerCase().replace(/\s+/g, "");
-}
-
-function scoreCard(card: CardCtx, llm: LLMOutput): number {
-  let score = 0;
-  const product = normalize(card.productName);
-  const lot = normalize(card.lotCode);
-  const assignee = normalize(card.assignee);
-  const column = normalize(card.columnName);
-
-  if (llm.product_hint && product && product.includes(normalize(llm.product_hint))) score += 10;
-  if (llm.lot_hint && lot && lot.includes(normalize(llm.lot_hint))) score += 8;
-  if (llm.assignee_hint && assignee && assignee.includes(normalize(llm.assignee_hint))) score += 5;
-  if (llm.from_stage_hint && column && column.includes(normalize(llm.from_stage_hint))) score += 3;
-  return score;
-}
-
-function resolveTargetColumn(
-  llm: LLMOutput,
-  columns: ColumnCtx[],
-  currentColumnId: string,
-): { toColumnId: string | null; reason: string } {
-  if (llm.to_stage) {
-    const t = normalize(llm.to_stage);
-    const exact = columns.find((c) => normalize(c.name) === t);
-    if (exact) return { toColumnId: exact.id, reason: `指定工程: ${exact.name}` };
-    const partial = columns.find((c) => normalize(c.name).includes(t));
-    if (partial) return { toColumnId: partial.id, reason: `指定工程(部分一致): ${partial.name}` };
-    return { toColumnId: null, reason: `工程「${llm.to_stage}」が見つかりません` };
-  }
-  if (llm.direction) {
-    const idx = columns.findIndex((c) => c.id === currentColumnId);
-    if (idx < 0) return { toColumnId: null, reason: "現在工程が不明" };
-    const targetIdx = llm.direction === "next" ? idx + 1 : idx - 1;
-    if (targetIdx < 0 || targetIdx >= columns.length) {
-      return { toColumnId: null, reason: "移動先工程がありません（端）" };
-    }
-    return { toColumnId: columns[targetIdx].id, reason: `${llm.direction === "next" ? "次" : "前"}工程: ${columns[targetIdx].name}` };
-  }
-  return { toColumnId: null, reason: "工程の指示なし" };
+  ]);
+  return {
+    columns,
+    cards: cards.map((c) => ({
+      id: c.id,
+      title: c.title,
+      productName: c.product?.name ?? null,
+      lotCode: c.lotCode,
+      columnId: c.columnId,
+      columnName: c.column.name,
+      assignee: c.assignee,
+      priority: c.priority,
+    })),
+  };
 }
 
 export async function POST(req: Request) {
@@ -143,89 +60,54 @@ export async function POST(req: Request) {
   if (!rawTranscript) {
     return NextResponse.json({ ok: false, error: "transcript is empty" }, { status: 400 });
   }
-  const columns = body?.context?.columns ?? [];
-  const cards = body?.context?.cards ?? [];
+
+  const { columns, cards } = await loadVoiceState();
   if (columns.length === 0 || cards.length === 0) {
-    return NextResponse.json({ ok: false, error: "context is missing" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "対象データがありません" }, { status: 400 });
   }
 
   const { normalized: normalizedTranscript, applied: replacements } = normalizeVoiceText(rawTranscript);
+  const engine: VoiceEngine = body.engine === "jev" || body.engine === "llama" ? body.engine : DEFAULT_VOICE_ENGINE;
+  const meta = { rawTranscript, normalizedTranscript, replacements, engine };
 
-  let llm: LLMOutput;
+  let result;
   try {
-    llm = await callLLM(normalizedTranscript, columns);
+    result =
+      engine === "jev"
+        ? await interpretWithJev(normalizedTranscript, cards, columns)
+        : await interpretWithLlama(normalizedTranscript, cards, columns);
   } catch (e) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: `LLM 呼び出し失敗: ${(e as Error).message}`,
-        rawTranscript,
-        normalizedTranscript,
-        replacements,
-      },
+      { ok: false, error: `LLM 呼び出し失敗: ${(e as Error).message}`, ...meta },
       { status: 502 },
     );
   }
 
-  const meta = { rawTranscript, normalizedTranscript, replacements };
-
-  if (llm.action !== "move") {
-    return NextResponse.json({ ok: false, error: "操作が解釈できません", llm, ...meta });
+  if (!result.ok) {
+    return NextResponse.json({ ok: false, error: result.error, confidence: result.confidence, ...meta });
   }
 
-  const scored = cards
-    .map((c) => ({ card: c, score: scoreCard(c, llm) }))
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (scored.length === 0) {
+  if (result.confidence != null && result.confidence < CONFIRM_THRESHOLD) {
     return NextResponse.json({
       ok: false,
-      error: "対象バッチが特定できません",
-      llm,
+      error: `指示の確信度が低いため実行しませんでした（確信度 ${Math.round(result.confidence * 100)}%）`,
+      confidence: result.confidence,
       ...meta,
     });
   }
 
-  const topScore = scored[0].score;
-  const candidates = scored.filter((x) => x.score === topScore);
-  if (candidates.length > 1) {
-    return NextResponse.json({
-      ok: false,
-      error: `候補が複数あります（${candidates.length} 件）`,
-      llm,
-      candidates: candidates.map((c) => ({
-        id: c.card.id,
-        productName: c.card.productName,
-        columnName: c.card.columnName,
-        lotCode: c.card.lotCode,
-      })),
-      ...meta,
-    });
-  }
+  const targetCard = cards.find((c) => c.id === result.cardId)!;
+  const targetColumn = columns.find((c) => c.id === result.toColumnId)!;
+  const needsConfirm = result.confidence != null && result.confidence < AUTO_THRESHOLD;
 
-  const targetCard = candidates[0].card;
-  const { toColumnId, reason } = resolveTargetColumn(llm, columns, targetCard.columnId);
-  if (!toColumnId) {
-    return NextResponse.json({ ok: false, error: reason, llm, ...meta });
-  }
-  if (toColumnId === targetCard.columnId) {
-    return NextResponse.json({
-      ok: false,
-      error: "移動先が現在工程と同じです",
-      llm,
-      ...meta,
-    });
-  }
-
-  const targetColumn = columns.find((c) => c.id === toColumnId)!;
   return NextResponse.json({
     ok: true,
-    cardId: targetCard.id,
-    toColumnId,
-    message: `${targetCard.productName ?? "バッチ"}（${targetCard.columnName}）を ${targetColumn.name} へ移動します`,
-    llm,
-    reason,
+    cardId: result.cardId,
+    toColumnId: result.toColumnId,
+    needsConfirm,
+    confidence: result.confidence,
+    message: `${targetCard.productName ?? targetCard.title}（${targetCard.columnName}）を ${targetColumn.name} へ移動します`,
+    reason: result.reason,
     ...meta,
   });
 }
