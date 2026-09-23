@@ -17,6 +17,7 @@ import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
 import { useSpeechRecognition } from "./useSpeechRecognition";
+import { useWhisperRecognition } from "./useWhisperRecognition";
 import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard, voiceMoveCard } from "../actions";
@@ -35,17 +36,19 @@ type VoicePending = {
 };
 
 type VoiceEngine = "jev" | "llama";
+type TranscribeEngine = "webspeech" | "whisper";
 
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
   equipments: BoardEquipment[];
   defaultVoiceEngine: VoiceEngine;
+  defaultTranscribeEngine: TranscribeEngine;
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products, equipments, defaultVoiceEngine }: Props) {
+export function Board({ initial, products, equipments, defaultVoiceEngine, defaultTranscribeEngine }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -152,6 +155,8 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   // 音声操作デモパネルで選べるエンジン。既定値はサーバの VOICE_ENGINE 環境変数から。
   const [voiceEngineChoice, setVoiceEngineChoice] = useState<VoiceEngine>(defaultVoiceEngine);
   const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
+  // 文字起こしエンジン。既定値はサーバの TRANSCRIBE_ENGINE 環境変数から。
+  const [transcribeEngine, setTranscribeEngine] = useState<TranscribeEngine>(defaultTranscribeEngine);
   const voicePhaseRef = useRef<VoicePhase>(voicePhase);
   voicePhaseRef.current = voicePhase;
   const voicePendingRef = useRef<VoicePending | null>(voicePending);
@@ -246,7 +251,9 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   const cancelVoiceMoveRef = useRef(cancelVoiceMove);
   cancelVoiceMoveRef.current = cancelVoiceMove;
 
-  const speech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
+  const webSpeech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
+  const whisperSpeech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
+  const speech = transcribeEngine === "whisper" ? whisperSpeech : webSpeech;
   const speechStartRef = useRef(speech.start);
   speechStartRef.current = speech.start;
   const speechStopRef = useRef(speech.stop);
@@ -331,6 +338,8 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
           lastEngine={voiceLastEngine}
           engineChoice={voiceEngineChoice}
           onEngineChoiceChange={setVoiceEngineChoice}
+          transcribeEngine={transcribeEngine}
+          onTranscribeEngineChange={setTranscribeEngine}
           pending={voicePending}
           onToggleVoice={toggleVoice}
           onReset={resetVoice}
@@ -457,6 +466,8 @@ function VoiceCommandBar({
   lastEngine,
   engineChoice,
   onEngineChoiceChange,
+  transcribeEngine,
+  onTranscribeEngineChange,
   pending,
   onToggleVoice,
   onReset,
@@ -480,6 +491,8 @@ function VoiceCommandBar({
   lastEngine: string | null;
   engineChoice: VoiceEngine;
   onEngineChoiceChange: (engine: VoiceEngine) => void;
+  transcribeEngine: TranscribeEngine;
+  onTranscribeEngineChange: (engine: TranscribeEngine) => void;
   pending: VoicePending | null;
   onToggleVoice: () => void;
   onReset: () => void;
@@ -540,23 +553,48 @@ function VoiceCommandBar({
         <span className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]}`}>
           {phaseLabel[phase]}
         </span>
-        <div className="flex items-center overflow-hidden rounded border border-zinc-300">
-          {(["jev", "llama"] as const).map((eng) => (
-            <button
-              key={eng}
-              type="button"
-              onClick={() => onEngineChoiceChange(eng)}
-              aria-pressed={engineChoice === eng}
-              className={`px-2 py-1 text-[11px] font-medium ${
-                engineChoice === eng
-                  ? "bg-violet-600 text-white"
-                  : "bg-white text-zinc-600 hover:bg-zinc-100"
-              }`}
-            >
-              {eng === "jev" ? "Jev" : "llama"}
-            </button>
-          ))}
-        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          文字起こし
+          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
+            {(["webspeech", "whisper"] as const).map((eng) => (
+              <button
+                key={eng}
+                type="button"
+                onClick={() => onTranscribeEngineChange(eng)}
+                aria-pressed={transcribeEngine === eng}
+                className={`px-2 py-1 text-[11px] font-medium ${
+                  transcribeEngine === eng
+                    ? "bg-teal-600 text-white"
+                    : "bg-white text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {eng === "webspeech" ? "Web Speech" : "Whisper"}
+              </button>
+            ))}
+          </div>
+        </label>
+        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          解釈
+          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
+            {(["jev", "llama"] as const).map((eng) => (
+              <button
+                key={eng}
+                type="button"
+                onClick={() => onEngineChoiceChange(eng)}
+                aria-pressed={engineChoice === eng}
+                className={`px-2 py-1 text-[11px] font-medium ${
+                  engineChoice === eng
+                    ? "bg-violet-600 text-white"
+                    : "bg-white text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {eng === "jev" ? "Jev" : "llama"}
+              </button>
+            ))}
+          </div>
+        </label>
         {lastEngine ? (
           <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
             前回: {lastEngine === "jev" ? "Jev" : "llama"}

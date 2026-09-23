@@ -5,7 +5,7 @@
 - **11工程固定**: 仕込 → 一次発酵 → 分割・丸め → ベンチタイム → 成形 → 二次発酵 → 焼成 → 冷却 → 包装 → 検品 → 出荷
 - バッチ（製造ロット）の追加・編集・工程間移動（ドラッグ&ドロップ）
 - 工程ごとの標準時間・滞留時間・標準超過アラート表示
-- 音声コマンドでバッチを次工程へ移動（TypeSafe AI「Jev」、ローカルLLMへの切替も可能）
+- 音声コマンドでバッチを次工程へ移動。文字起こし（Web Speech API / Whisper）・解釈（TypeSafe AI「Jev」/ ローカルLLM）とも切替可能
 - Bluetoothイヤホンの物理ボタンで録音開始/停止・リセット（Shokz OpenFit 2+ で動作確認）
 - ダッシュボード（本日のKPI・要注意バッチ・製品別/アレルゲン別集計）
 - 振り返りKPI（過去7日の出荷数・リードタイム・品質合格率・ボトルネック工程）
@@ -24,7 +24,8 @@
 | データ層 | Prisma 7 + SQLite (`@prisma/adapter-better-sqlite3` / `better-sqlite3`) |
 | ミューテーション | Server Actions + `updateTag('board')` |
 | ドラッグ & ドロップ | `@dnd-kit/core` / `@dnd-kit/sortable` |
-| 音声入力 | Web Speech API（Chrome/Safari） + TypeSafe AI「Jev」（既定）/ ローカルLLM（llama.cpp 等、OpenAI互換API） |
+| 音声入力（文字起こし） | Web Speech API（既定、Chrome/Safari）/ whisper-server（whisper.cpp、要 `--convert`） |
+| 音声入力（解釈） | TypeSafe AI「Jev」（既定）/ ローカルLLM（llama.cpp 等、OpenAI互換API） |
 | BT連携・TTS | [`mic-test`](https://github.com/Takashi-Matsumura/mic-test)（GitHub直接依存、Media Session API経由のAVRCP制御） |
 
 ## セットアップ
@@ -39,6 +40,31 @@ npm run dev              # 開発サーバを起動
 ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。シードデータは実行日基準で動的生成されるため、いつ実行しても「本日分」のバッチとして表示されます。
 
 ### 音声入力を使う場合（任意）
+
+音声コマンドは「文字起こし（発話→テキスト）」と「解釈（テキスト→操作）」の2段階。それぞれ独立して切り替えられます。
+
+#### 文字起こしエンジン
+
+既定はブラウザの Web Speech API（サーバ不要、リアルタイムに文字が表示される）。
+
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) の `whisper-server` に切り替えると、ブラウザの音声認識より高精度な文字起こしができます（マイク音声をまとめて録音し、停止後にサーバへ送って文字起こしするため、Web Speech API のような逐次表示はありません）。
+
+```bash
+brew install whisper-cpp
+# モデルは別途用意する（例: ggml-large-v3-turbo-q5_0.bin を ~/.local/share/whisper-models/ 等に配置）
+whisper-server -m /path/to/ggml-large-v3-turbo-q5_0.bin --host 127.0.0.1 --port 8090 -l ja --convert
+```
+
+`--convert`（ffmpeg 変換、要 `brew install ffmpeg`）はブラウザの `MediaRecorder` が出力する webm/opus 形式を受け付けるために必須です。
+
+```bash
+TRANSCRIBE_ENGINE=webspeech      # 既定値。webspeech | whisper で切替
+WHISPER_URL=http://localhost:8090 # 既定値。whisper-server のエンドポイント
+```
+
+`TRANSCRIBE_ENGINE` はサーバ起動時の既定値。音声操作デモパネルの `Web Speech`/`Whisper` ボタンでリクエスト単位に切り替えることもできる（サーバ再起動不要）。ブラウザ→`/api/transcribe`（Next.js）→`whisper-server` の順に中継し、CORS を回避している。
+
+#### 解釈エンジン
 
 音声コマンドは既定で [TypeSafe AI](https://typesafe.ai) の Jev を使って解釈します。`.env.local` に API キーを設定してください。
 
