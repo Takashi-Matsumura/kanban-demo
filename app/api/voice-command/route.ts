@@ -2,17 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeVoiceText } from "@/lib/voice-dictionary";
 import { interpretWithJev } from "@/lib/voice/jev";
-import { interpretWithLlama } from "@/lib/voice/llama";
 import type { CardCtx, ColumnCtx } from "@/lib/voice/types";
-
-type VoiceEngine = "jev" | "llama";
-
-const DEFAULT_VOICE_ENGINE: VoiceEngine = process.env.VOICE_ENGINE === "llama" ? "llama" : "jev";
 
 const AUTO_THRESHOLD = 0.85;
 const CONFIRM_THRESHOLD = 0.6;
 
-type RequestBody = { transcript: string; engine?: VoiceEngine };
+type RequestBody = { transcript: string };
 
 /**
  * columns/cards はクライアントの context ではなく、ここで DB から直接取得する。
@@ -67,18 +62,14 @@ export async function POST(req: Request) {
   }
 
   const { normalized: normalizedTranscript, applied: replacements } = normalizeVoiceText(rawTranscript);
-  const engine: VoiceEngine = body.engine === "jev" || body.engine === "llama" ? body.engine : DEFAULT_VOICE_ENGINE;
-  const meta = { rawTranscript, normalizedTranscript, replacements, engine };
+  const meta = { rawTranscript, normalizedTranscript, replacements };
 
   let result;
   try {
-    result =
-      engine === "jev"
-        ? await interpretWithJev(normalizedTranscript, cards, columns)
-        : await interpretWithLlama(normalizedTranscript, cards, columns);
+    result = await interpretWithJev(normalizedTranscript, cards, columns);
   } catch (e) {
     return NextResponse.json(
-      { ok: false, error: `LLM 呼び出し失敗: ${(e as Error).message}`, ...meta },
+      { ok: false, error: `Jev 呼び出し失敗: ${(e as Error).message}`, ...meta },
       { status: 502 },
     );
   }

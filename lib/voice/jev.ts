@@ -50,7 +50,7 @@ function targetCriteria(columns: ColumnCtx[]): Record<string, string> {
 
 /**
  * Jev の state には無関係な情報が多いと精度が落ちるため（model-jaggedness/jev-1.13）、
- * 発話と工程順のみを渡す。業務ドキュメント（docs/voice/*）はここでは使わない。
+ * 発話と工程順のみを渡す。
  */
 export async function interpretWithJev(
   transcript: string,

@@ -33,12 +33,7 @@ export default async function BoardPage() {
           <StageFlow stages={flowStages} clickable />
         </div>
       </div>
-      <Board
-        initial={columns}
-        products={products}
-        equipments={equipments}
-        defaultVoiceEngine={process.env.VOICE_ENGINE === "llama" ? "llama" : "jev"}
-      />
+      <Board initial={columns} products={products} equipments={equipments} />
     </main>
   );
 }

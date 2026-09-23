@@ -34,18 +34,15 @@ type VoicePending = {
   toColumnId: string;
 };
 
-type VoiceEngine = "jev" | "llama";
-
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
   equipments: BoardEquipment[];
-  defaultVoiceEngine: VoiceEngine;
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products, equipments, defaultVoiceEngine }: Props) {
+export function Board({ initial, products, equipments }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -148,10 +145,6 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
   const [voiceNormalization, setVoiceNormalization] = useState<VoiceNormalization | null>(null);
   const [voicePending, setVoicePending] = useState<VoicePending | null>(null);
   const [voiceConfidence, setVoiceConfidence] = useState<number | null>(null);
-  const [voiceLastEngine, setVoiceLastEngine] = useState<string | null>(null);
-  // 音声操作デモパネルで選べるエンジン。既定値はサーバの VOICE_ENGINE 環境変数から。
-  const [voiceEngineChoice, setVoiceEngineChoice] = useState<VoiceEngine>(defaultVoiceEngine);
-  const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
   const voicePhaseRef = useLatestRef(voicePhase);
   const voicePendingRef = useLatestRef(voicePending);
 
@@ -192,7 +185,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       const res = await fetch("/api/voice-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: text, engine: voiceEngineChoiceRef.current }),
+        body: JSON.stringify({ transcript: text }),
       });
       const data = await res.json();
       if (data.rawTranscript || data.normalizedTranscript) {
@@ -203,7 +196,6 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
         });
       }
       setVoiceConfidence(typeof data.confidence === "number" ? data.confidence : null);
-      setVoiceLastEngine(typeof data.engine === "string" ? data.engine : null);
       if (!data.ok) {
         if (data.ignored) {
           // 常時録音中に拾った、操作指示ではない発話（雑談・雑音等）。
@@ -241,7 +233,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
       scheduleReturnToListening(4000);
     }
-  }, [voiceEngineChoiceRef, ttsSpeakRef, ttsSupportedRef, voicePhaseRef, scheduleReturnToListening]);
+  }, [ttsSpeakRef, ttsSupportedRef, voicePhaseRef, scheduleReturnToListening]);
 
   const confirmVoiceMove = useCallback(async () => {
     const pending = voicePendingRef.current;
@@ -342,6 +334,17 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
     onNext: handleBtNext,
   });
 
+  // 「録音」ボタンは BT 連携の有効化/無効化と常時音声操作の開始/停止をまとめて行う。
+  // BT 未対応環境では BT 連携をスキップし、録音のON/OFFだけを行う。
+  const handleRecordingToggle = useCallback(() => {
+    const startingNow = !isListeningRef.current;
+    if (openfit.isSupported) {
+      if (startingNow) openfit.enable();
+      else openfit.disable();
+    }
+    toggleVoice();
+  }, [isListeningRef, toggleVoice, openfit]);
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
       <VoiceDemoWidget
@@ -350,10 +353,6 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
         isListening={speech.isListening}
       >
         <VoiceCommandBar
-          btSupported={openfit.isSupported}
-          btEnabled={openfit.enabled}
-          onBtEnable={openfit.enable}
-          onBtDisable={openfit.disable}
           btError={openfit.error}
           speechSupported={speech.isSupported}
           isListening={speech.isListening}
@@ -364,11 +363,8 @@ export function Board({ initial, products, equipments, defaultVoiceEngine }: Pro
           message={voiceMessage}
           normalization={voiceNormalization}
           confidence={voiceConfidence}
-          lastEngine={voiceLastEngine}
-          engineChoice={voiceEngineChoice}
-          onEngineChoiceChange={setVoiceEngineChoice}
           pending={voicePending}
-          onToggleVoice={toggleVoice}
+          onToggleRecording={handleRecordingToggle}
           onReset={resetVoice}
           onConfirm={confirmVoiceMove}
           onCancel={cancelVoiceMove}
@@ -476,10 +472,6 @@ function VoiceDemoWidget({
 }
 
 function VoiceCommandBar({
-  btSupported,
-  btEnabled,
-  onBtEnable,
-  onBtDisable,
   btError,
   speechSupported,
   isListening,
@@ -490,19 +482,12 @@ function VoiceCommandBar({
   message,
   normalization,
   confidence,
-  lastEngine,
-  engineChoice,
-  onEngineChoiceChange,
   pending,
-  onToggleVoice,
+  onToggleRecording,
   onReset,
   onConfirm,
   onCancel,
 }: {
-  btSupported: boolean;
-  btEnabled: boolean;
-  onBtEnable: () => void;
-  onBtDisable: () => void;
   btError: Error | null;
   speechSupported: boolean;
   isListening: boolean;
@@ -513,11 +498,8 @@ function VoiceCommandBar({
   message: string | null;
   normalization: VoiceNormalization | null;
   confidence: number | null;
-  lastEngine: string | null;
-  engineChoice: VoiceEngine;
-  onEngineChoiceChange: (engine: VoiceEngine) => void;
   pending: VoicePending | null;
-  onToggleVoice: () => void;
+  onToggleRecording: () => void;
   onReset: () => void;
   onConfirm: () => void;
   onCancel: () => void;
@@ -543,22 +525,9 @@ function VoiceCommandBar({
   return (
     <div className="flex flex-col gap-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        {btSupported ? (
-          <button
-            type="button"
-            onClick={btEnabled ? onBtDisable : onBtEnable}
-            className={`rounded px-3 py-1 font-medium ${
-              btEnabled
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
-            }`}
-          >
-            {btEnabled ? "BT 連携: ON" : "BT 連携を有効化"}
-          </button>
-        ) : null}
         <button
           type="button"
-          onClick={onToggleVoice}
+          onClick={onToggleRecording}
           disabled={!speechSupported}
           className={`rounded px-3 py-1 font-medium ${
             isListening
@@ -566,7 +535,7 @@ function VoiceCommandBar({
               : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
           }`}
         >
-          {isListening ? "■ 常時音声操作 停止" : "🎤 常時音声操作 開始"}
+          {isListening ? "■ 録音停止" : "🎤 録音を開始"}
         </button>
         <button
           type="button"
@@ -582,42 +551,19 @@ function VoiceCommandBar({
         >
           {isSpeaking && phase === "recording" ? "🗣 発話検出中..." : phaseLabel[phase]}
         </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-          解釈
-          <div className="flex items-center overflow-hidden rounded border border-zinc-300">
-            {(["jev", "llama"] as const).map((eng) => (
-              <button
-                key={eng}
-                type="button"
-                onClick={() => onEngineChoiceChange(eng)}
-                aria-pressed={engineChoice === eng}
-                className={`px-2 py-1 text-[11px] font-medium ${
-                  engineChoice === eng
-                    ? "bg-violet-600 text-white"
-                    : "bg-white text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                {eng === "jev" ? "Jev" : "llama"}
-              </button>
-            ))}
-          </div>
-        </label>
-        {lastEngine ? (
+        {confidence != null ? (
           <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
-            前回: {lastEngine === "jev" ? "Jev" : "llama"}
-            {confidence != null ? ` ${Math.round(confidence * 100)}%` : ""}
+            前回の確信度: {Math.round(confidence * 100)}%
           </span>
         ) : null}
       </div>
       <p className="text-[11px] leading-snug text-zinc-500">
-        {btEnabled
+        {isListening
           ? phase === "confirm"
             ? "BT: シングル→実行, ダブル→取消。"
-            : "BT: シングル→常時音声操作 ON/OFF, ダブル→リセット。"
+            : "BT: シングル→録音 ON/OFF, ダブル→リセット。"
           : ""}
-        マイクは常時オンのまま、発話の切れ目を自動検出して順に処理します。
+        「録音」を押すとBT連携も有効化し、マイクを常時オンのまま発話の切れ目を自動検出して順に処理します。
         発話例: 「フランスパンを成形へ」「角食パンを次へ」
       </p>
 
