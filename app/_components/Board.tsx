@@ -529,13 +529,14 @@ function VoiceCommandBar({
           type="button"
           onClick={onToggleRecording}
           disabled={!speechSupported}
-          className={`rounded px-3 py-1 font-medium ${
+          aria-pressed={isListening}
+          className={`rounded px-3 py-1 font-medium transition ${
             isListening
-              ? "bg-red-600 text-white hover:bg-red-700"
+              ? "bg-blue-600 text-white hover:bg-blue-700"
               : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
           }`}
         >
-          {isListening ? "■ 録音停止" : "🎤 録音を開始"}
+          {isListening ? "🎙 録音: ON" : "🎤 録音を開始"}
         </button>
         <button
           type="button"
