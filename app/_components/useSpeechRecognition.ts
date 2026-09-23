@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLatestRef } from "./useLatestRef";
 
 // Web Speech API の型 (グローバル window への拡張)
 type RecognitionResult = {
@@ -56,14 +57,18 @@ export function useSpeechRecognition(options: Options = {}): SpeechRecognitionHo
   const [error, setError] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState(false);
   const recRef = useRef<RecognitionInstance | null>(null);
-  const onFinalRef = useRef(onFinal);
-  onFinalRef.current = onFinal;
+  const onFinalRef = useLatestRef(onFinal);
   const finalAccRef = useRef("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    setIsSupported(!!Ctor);
+    // ブラウザ API の対応可否は setInterval/setTimeout と同様「外部システムからの通知」として
+    // コールバック経由で反映する（effect 本体で直接 setState しない）
+    const id = setTimeout(() => {
+      const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+      setIsSupported(!!Ctor);
+    }, 0);
+    return () => clearTimeout(id);
   }, []);
 
   const start = useCallback(() => {
@@ -114,7 +119,7 @@ export function useSpeechRecognition(options: Options = {}): SpeechRecognitionHo
     } catch (e) {
       setError(`音声認識を開始できません: ${(e as Error).message}`);
     }
-  }, [lang]);
+  }, [lang, onFinalRef]);
 
   const stop = useCallback(() => {
     recRef.current?.stop();
