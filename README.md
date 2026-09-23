@@ -47,6 +47,8 @@ VOICE_ENGINE=jev                # 既定値。jev | llama で切替
 TYPESAFE_API_KEY=your-api-key   # https://typesafe.ai で発行したキー
 ```
 
+`VOICE_ENGINE` はサーバ起動時の既定値。音声操作デモパネルの `Jev`/`llama` ボタンでリクエスト単位に切り替えることもできる（サーバ再起動不要）。
+
 Jev の確信度に応じて挙動が変わります。
 
 | 確信度 | 挙動 |

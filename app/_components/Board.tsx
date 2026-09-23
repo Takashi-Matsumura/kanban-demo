@@ -17,6 +17,7 @@ import { Column } from "./Column";
 import { Card } from "./Card";
 import { CardDetail } from "./CardDetail";
 import { useSpeechRecognition } from "./useSpeechRecognition";
+import { useLatestRef } from "./useLatestRef";
 import type { BoardColumn, BoardEquipment, BoardProduct } from "@/lib/board";
 import { moveCard, voiceMoveCard } from "../actions";
 
@@ -33,15 +34,18 @@ type VoicePending = {
   toColumnId: string;
 };
 
+type VoiceEngine = "jev" | "llama";
+
 type Props = {
   initial: BoardColumn[];
   products: BoardProduct[];
   equipments: BoardEquipment[];
+  defaultVoiceEngine: VoiceEngine;
 };
 
 const ORDER_STEP = 1024;
 
-export function Board({ initial, products, equipments }: Props) {
+export function Board({ initial, products, equipments, defaultVoiceEngine }: Props) {
   const [columns, setColumns] = useState<BoardColumn[]>(initial);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -144,7 +148,10 @@ export function Board({ initial, products, equipments }: Props) {
   const [voiceNormalization, setVoiceNormalization] = useState<VoiceNormalization | null>(null);
   const [voicePending, setVoicePending] = useState<VoicePending | null>(null);
   const [voiceConfidence, setVoiceConfidence] = useState<number | null>(null);
-  const [voiceEngine, setVoiceEngine] = useState<string | null>(null);
+  const [voiceLastEngine, setVoiceLastEngine] = useState<string | null>(null);
+  // 音声操作デモパネルで選べるエンジン。既定値はサーバの VOICE_ENGINE 環境変数から。
+  const [voiceEngineChoice, setVoiceEngineChoice] = useState<VoiceEngine>(defaultVoiceEngine);
+  const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
   const voicePhaseRef = useRef<VoicePhase>(voicePhase);
   voicePhaseRef.current = voicePhase;
   const voicePendingRef = useRef<VoicePending | null>(voicePending);
@@ -166,7 +173,7 @@ export function Board({ initial, products, equipments }: Props) {
       const res = await fetch("/api/voice-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: text }),
+        body: JSON.stringify({ transcript: text, engine: voiceEngineChoiceRef.current }),
       });
       const data = await res.json();
       if (data.rawTranscript || data.normalizedTranscript) {
@@ -177,7 +184,7 @@ export function Board({ initial, products, equipments }: Props) {
         });
       }
       setVoiceConfidence(typeof data.confidence === "number" ? data.confidence : null);
-      setVoiceEngine(typeof data.engine === "string" ? data.engine : null);
+      setVoiceLastEngine(typeof data.engine === "string" ? data.engine : null);
       if (!data.ok) {
         setVoicePhase("error");
         const msg = data.error ?? "指示を解釈できませんでした";
@@ -204,7 +211,7 @@ export function Board({ initial, products, equipments }: Props) {
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
     }
-  }, []);
+  }, [voiceEngineChoiceRef]);
 
   const confirmVoiceMove = useCallback(async () => {
     const pending = voicePendingRef.current;
@@ -321,7 +328,9 @@ export function Board({ initial, products, equipments }: Props) {
           message={voiceMessage}
           normalization={voiceNormalization}
           confidence={voiceConfidence}
-          engine={voiceEngine}
+          lastEngine={voiceLastEngine}
+          engineChoice={voiceEngineChoice}
+          onEngineChoiceChange={setVoiceEngineChoice}
           pending={voicePending}
           onToggleVoice={toggleVoice}
           onReset={resetVoice}
@@ -445,7 +454,9 @@ function VoiceCommandBar({
   message,
   normalization,
   confidence,
-  engine,
+  lastEngine,
+  engineChoice,
+  onEngineChoiceChange,
   pending,
   onToggleVoice,
   onReset,
@@ -466,7 +477,9 @@ function VoiceCommandBar({
   message: string | null;
   normalization: VoiceNormalization | null;
   confidence: number | null;
-  engine: string | null;
+  lastEngine: string | null;
+  engineChoice: VoiceEngine;
+  onEngineChoiceChange: (engine: VoiceEngine) => void;
   pending: VoicePending | null;
   onToggleVoice: () => void;
   onReset: () => void;
@@ -527,9 +540,26 @@ function VoiceCommandBar({
         <span className={`rounded px-2 py-0.5 font-mono text-[11px] ${phaseClass[phase]}`}>
           {phaseLabel[phase]}
         </span>
-        {engine ? (
+        <div className="flex items-center overflow-hidden rounded border border-zinc-300">
+          {(["jev", "llama"] as const).map((eng) => (
+            <button
+              key={eng}
+              type="button"
+              onClick={() => onEngineChoiceChange(eng)}
+              aria-pressed={engineChoice === eng}
+              className={`px-2 py-1 text-[11px] font-medium ${
+                engineChoice === eng
+                  ? "bg-violet-600 text-white"
+                  : "bg-white text-zinc-600 hover:bg-zinc-100"
+              }`}
+            >
+              {eng === "jev" ? "Jev" : "llama"}
+            </button>
+          ))}
+        </div>
+        {lastEngine ? (
           <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
-            {engine === "jev" ? "Jev" : "llama"}
+            前回: {lastEngine === "jev" ? "Jev" : "llama"}
             {confidence != null ? ` ${Math.round(confidence * 100)}%` : ""}
           </span>
         ) : null}

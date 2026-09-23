@@ -5,12 +5,14 @@ import { interpretWithJev } from "@/lib/voice/jev";
 import { interpretWithLlama } from "@/lib/voice/llama";
 import type { CardCtx, ColumnCtx } from "@/lib/voice/types";
 
-const VOICE_ENGINE = process.env.VOICE_ENGINE === "llama" ? "llama" : "jev";
+type VoiceEngine = "jev" | "llama";
+
+const DEFAULT_VOICE_ENGINE: VoiceEngine = process.env.VOICE_ENGINE === "llama" ? "llama" : "jev";
 
 const AUTO_THRESHOLD = 0.85;
 const CONFIRM_THRESHOLD = 0.6;
 
-type RequestBody = { transcript: string };
+type RequestBody = { transcript: string; engine?: VoiceEngine };
 
 /**
  * columns/cards はクライアントの context ではなく、ここで DB から直接取得する。
@@ -65,12 +67,13 @@ export async function POST(req: Request) {
   }
 
   const { normalized: normalizedTranscript, applied: replacements } = normalizeVoiceText(rawTranscript);
-  const meta = { rawTranscript, normalizedTranscript, replacements, engine: VOICE_ENGINE };
+  const engine: VoiceEngine = body.engine === "jev" || body.engine === "llama" ? body.engine : DEFAULT_VOICE_ENGINE;
+  const meta = { rawTranscript, normalizedTranscript, replacements, engine };
 
   let result;
   try {
     result =
-      VOICE_ENGINE === "jev"
+      engine === "jev"
         ? await interpretWithJev(normalizedTranscript, cards, columns)
         : await interpretWithLlama(normalizedTranscript, cards, columns);
   } catch (e) {
