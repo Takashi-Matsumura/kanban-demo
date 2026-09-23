@@ -157,16 +157,12 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
   const voiceEngineChoiceRef = useLatestRef(voiceEngineChoice);
   // 文字起こしエンジン。既定値はサーバの TRANSCRIBE_ENGINE 環境変数から。
   const [transcribeEngine, setTranscribeEngine] = useState<TranscribeEngine>(defaultTranscribeEngine);
-  const voicePhaseRef = useRef<VoicePhase>(voicePhase);
-  voicePhaseRef.current = voicePhase;
-  const voicePendingRef = useRef<VoicePending | null>(voicePending);
-  voicePendingRef.current = voicePending;
+  const voicePhaseRef = useLatestRef(voicePhase);
+  const voicePendingRef = useLatestRef(voicePending);
 
   const tts = useSpeechSynthesis({ lang: "ja-JP" });
-  const ttsSpeakRef = useRef(tts.speak);
-  ttsSpeakRef.current = tts.speak;
-  const ttsSupportedRef = useRef(tts.isSupported);
-  ttsSupportedRef.current = tts.isSupported;
+  const ttsSpeakRef = useLatestRef(tts.speak);
+  const ttsSupportedRef = useLatestRef(tts.isSupported);
 
   const handleTranscript = useCallback(async (text: string) => {
     setVoicePhase("processing");
@@ -216,7 +212,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
       setVoiceMessage(msg);
       if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
     }
-  }, [voiceEngineChoiceRef]);
+  }, [voiceEngineChoiceRef, ttsSpeakRef, ttsSupportedRef]);
 
   const confirmVoiceMove = useCallback(async () => {
     const pending = voicePendingRef.current;
@@ -236,7 +232,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
     } finally {
       setVoicePending(null);
     }
-  }, []);
+  }, [voicePendingRef, ttsSpeakRef, ttsSupportedRef]);
 
   const cancelVoiceMove = useCallback(() => {
     setVoicePending(null);
@@ -244,31 +240,22 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
     const msg = "取消しました";
     setVoiceMessage(msg);
     if (ttsSupportedRef.current) ttsSpeakRef.current(msg);
-  }, []);
+  }, [ttsSpeakRef, ttsSupportedRef]);
 
-  const confirmVoiceMoveRef = useRef(confirmVoiceMove);
-  confirmVoiceMoveRef.current = confirmVoiceMove;
-  const cancelVoiceMoveRef = useRef(cancelVoiceMove);
-  cancelVoiceMoveRef.current = cancelVoiceMove;
+  const confirmVoiceMoveRef = useLatestRef(confirmVoiceMove);
+  const cancelVoiceMoveRef = useLatestRef(cancelVoiceMove);
 
   const webSpeech = useSpeechRecognition({ lang: "ja-JP", onFinal: handleTranscript });
   const whisperSpeech = useWhisperRecognition({ lang: "ja", onFinal: handleTranscript });
   const speech = transcribeEngine === "whisper" ? whisperSpeech : webSpeech;
-  const speechStartRef = useRef(speech.start);
-  speechStartRef.current = speech.start;
-  const speechStopRef = useRef(speech.stop);
-  speechStopRef.current = speech.stop;
-  const speechResetRef = useRef(speech.reset);
-  speechResetRef.current = speech.reset;
-  const isListeningRef = useRef(speech.isListening);
-  isListeningRef.current = speech.isListening;
+  const speechStartRef = useLatestRef(speech.start);
+  const speechStopRef = useLatestRef(speech.stop);
+  const speechResetRef = useLatestRef(speech.reset);
+  const isListeningRef = useLatestRef(speech.isListening);
 
   // 音声操作デモは既定で閉じておき、本来の工程詳細（カンバン）を主役にする。
   // BT リモートや録音開始で呼び出された時だけ自動展開し、フィードバックを見せる。
   const [voiceDemoOpen, setVoiceDemoOpen] = useState(false);
-  useEffect(() => {
-    if (speech.isListening) setVoiceDemoOpen(true);
-  }, [speech.isListening]);
 
   const toggleVoice = useCallback(() => {
     if (isListeningRef.current) {
@@ -277,9 +264,10 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
       setVoicePhase("recording");
       setVoiceMessage(null);
       setVoiceNormalization(null);
+      setVoiceDemoOpen(true);
       speechStartRef.current();
     }
-  }, []);
+  }, [isListeningRef, speechStartRef, speechStopRef]);
 
   const resetVoice = useCallback(() => {
     if (isListeningRef.current) speechStopRef.current();
@@ -287,7 +275,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
     setVoicePhase("idle");
     setVoiceMessage(null);
     setVoiceNormalization(null);
-  }, []);
+  }, [isListeningRef, speechStopRef, speechResetRef]);
 
   // 確認待ち（needsConfirm）のときは BT イヤホンのボタンを 実行/取消 に割り当てる。
   // マウスを使わずに操作できるようにするため。
@@ -297,7 +285,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
     } else {
       toggleVoice();
     }
-  }, [toggleVoice]);
+  }, [toggleVoice, voicePhaseRef, confirmVoiceMoveRef]);
 
   const handleBtNext = useCallback(() => {
     if (voicePhaseRef.current === "confirm") {
@@ -305,7 +293,7 @@ export function Board({ initial, products, equipments, defaultVoiceEngine, defau
     } else {
       resetVoice();
     }
-  }, [resetVoice]);
+  }, [resetVoice, voicePhaseRef, cancelVoiceMoveRef]);
 
   const openfit = useOpenFit({
     metadata: { title: "製パンライン カンバン" },
