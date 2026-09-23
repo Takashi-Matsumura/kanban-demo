@@ -43,3 +43,6 @@ next-env.d.ts
 # prisma (local-only sqlite db)
 /prisma/dev.db
 /prisma/dev.db-journal
+
+# whisper-server の --convert が作業ディレクトリで起動された場合の一時ファイル
+whisper-server-*.wav

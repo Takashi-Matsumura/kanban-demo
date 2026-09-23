@@ -38,7 +38,6 @@ export default async function BoardPage() {
         products={products}
         equipments={equipments}
         defaultVoiceEngine={process.env.VOICE_ENGINE === "llama" ? "llama" : "jev"}
-        defaultTranscribeEngine={process.env.TRANSCRIBE_ENGINE === "whisper" ? "whisper" : "webspeech"}
       />
     </main>
   );

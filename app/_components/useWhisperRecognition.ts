@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLatestRef } from "./useLatestRef";
-import type { SpeechRecognitionHook } from "./useSpeechRecognition";
+
+export type TranscriptionHook = {
+  isSupported: boolean;
+  isListening: boolean;
+  /** Whisper はまとめて文字起こしするため常に空文字（逐次の途中結果は無い） */
+  interim: string;
+  finalText: string;
+  error: string | null;
+  start: () => void;
+  stop: () => void;
+  reset: () => void;
+};
 
 type Options = {
   lang?: string;
@@ -18,11 +29,10 @@ function pickMimeType(): string | undefined {
 
 /**
  * サーバの whisper-server（whisper.cpp、要 --convert）にマイク音声を送って文字起こしする。
- * Web Speech API と違い逐次の interim 結果は無く、録音停止後にまとめて届く
- * （interim は常に空文字。isListening は録音停止〜文字起こし完了まで true のまま
- * にして、呼び出し側の状態遷移を useSpeechRecognition と揃える）。
+ * 逐次の interim 結果は無く、録音停止後にまとめて届く（isListening は
+ * 録音停止〜文字起こし完了まで true のままにして呼び出し側の状態遷移を単純に保つ）。
  */
-export function useWhisperRecognition(options: Options = {}): SpeechRecognitionHook {
+export function useWhisperRecognition(options: Options = {}): TranscriptionHook {
   const { lang = "ja", onFinal } = options;
   const [isListening, setIsListening] = useState(false);
   const [finalText, setFinalText] = useState("");
